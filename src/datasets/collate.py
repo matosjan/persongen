@@ -13,13 +13,18 @@ def collate_fn(dataset_items: list[dict]):
         result_batch (dict[Tensor]): dict, containing batch-version
             of the tensors.
     """
+    pixel_values = torch.stack([example["pixel_values"] for example in dataset_items])
+    pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
+    original_sizes = [example["original_sizes"] for example in dataset_items]
+    crop_top_lefts = [example["crop_top_lefts"] for example in dataset_items]
+    caption = [example['caption'] for example in dataset_items]
+    ref_images = [example['ref_images'] for example in dataset_items]
 
-    result_batch = {}
-
-    # example of collate_fn
-    result_batch["data_object"] = torch.vstack(
-        [elem["data_object"] for elem in dataset_items]
-    )
-    result_batch["labels"] = torch.tensor([elem["labels"] for elem in dataset_items])
-
+    result_batch = {
+        "pixel_values": pixel_values,
+        "original_sizes": original_sizes,
+        "crop_top_lefts": crop_top_lefts,
+        "caption": caption,
+        "ref_images": ref_images,
+    }
     return result_batch

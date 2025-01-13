@@ -198,7 +198,7 @@ class BaseTrainer:
                 this epoch.
         """
         self.is_train = True
-        self.model.train()
+        # self.model.train()
         self.train_metrics.reset()
         self.writer.set_step((epoch - 1) * self.epoch_len)
         self.writer.add_scalar("epoch", epoch)
@@ -228,9 +228,9 @@ class BaseTrainer:
                         epoch, self._progress(batch_idx), batch["loss"].item()
                     )
                 )
-                self.writer.add_scalar(
-                    "learning rate", self.lr_scheduler.get_last_lr()[0]
-                )
+                # self.writer.add_scalar(
+                #     "learning rate", self.lr_scheduler.get_last_lr()[0]
+                # )
                 self._log_scalars(self.train_metrics)
                 self._log_batch(batch_idx, batch)
                 # we don't want to reset train metrics at the start of every epoch
@@ -379,8 +379,9 @@ class BaseTrainer:
         config.trainer.max_grad_norm
         """
         if self.config["trainer"].get("max_grad_norm", None) is not None:
+            params_to_optimize = filter(lambda p: p.requires_grad, self.model.unet.parameters())
             clip_grad_norm_(
-                self.model.parameters(), self.config["trainer"]["max_grad_norm"]
+                params_to_optimize, self.config["trainer"]["max_grad_norm"]
             )
 
     @torch.no_grad()
@@ -393,7 +394,7 @@ class BaseTrainer:
         Returns:
             total_norm (float): the calculated norm.
         """
-        parameters = self.model.parameters()
+        parameters = filter(lambda p: p.requires_grad, self.model.unet.parameters())
         if isinstance(parameters, torch.Tensor):
             parameters = [parameters]
         parameters = [p for p in parameters if p.grad is not None]

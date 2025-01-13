@@ -4,6 +4,7 @@ from typing import List
 
 import torch
 from torch.utils.data import Dataset
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ class BaseDataset(Dataset):
     """
 
     def __init__(
-        self, index, limit=None, shuffle_index=False, instance_transforms=None
+        self, index, image_paths, limit=None, shuffle_index=False, instance_transforms=None
     ):
         """
         Args:
@@ -34,6 +35,7 @@ class BaseDataset(Dataset):
                 tensor name.
         """
         self._assert_index_is_valid(index)
+        self.image_paths = image_paths
 
         index = self._shuffle_and_limit_index(index, limit, shuffle_index)
         self._index: List[dict] = index
@@ -56,13 +58,28 @@ class BaseDataset(Dataset):
                 (a single dataset element).
         """
         data_dict = self._index[ind]
-        data_path = data_dict["path"]
-        data_object = self.load_object(data_path)
-        data_label = data_dict["label"]
+        img_path = data_dict["img_path"]
+        img = self.load_object(img_path)
+        caption = data_dict["caption"]
 
-        instance_data = {"data_object": data_object, "labels": data_label}
+        ref_images = []
+        num_ref_images = random.randint(1, 4)
+        used_indexes = {ind}
+        while len(ref_images) != num_ref_images:
+            new_ref_idx = random.randint(0, len(self.image_paths) - 1)
+            if new_ref_idx not in used_indexes:
+                used_indexes.add(new_ref_idx)
+                ref_images.append(self.load_object(self.image_paths[new_ref_idx]))
+    
+        instance_data = {
+            "pixel_values": img,
+            "ref_images": ref_images,
+            "caption": caption,
+            "original_sizes": (img.height, img.width),
+            "crop_top_lefts": (0, 0),
+        }
         instance_data = self.preprocess_data(instance_data)
-
+        print(instance_data['pixel_values'].shape)
         return instance_data
 
     def __len__(self):
@@ -80,8 +97,8 @@ class BaseDataset(Dataset):
         Returns:
             data_object (Tensor):
         """
-        data_object = torch.load(path)
-        return data_object
+
+        return Image.open(path).convert('RGB')
 
     def preprocess_data(self, instance_data):
         """
@@ -99,6 +116,7 @@ class BaseDataset(Dataset):
         """
         if self.instance_transforms is not None:
             for transform_name in self.instance_transforms.keys():
+                print('goool', transform_name)
                 instance_data[transform_name] = self.instance_transforms[
                     transform_name
                 ](instance_data[transform_name])
@@ -139,12 +157,12 @@ class BaseDataset(Dataset):
                 such as label and object path.
         """
         for entry in index:
-            assert "path" in entry, (
-                "Each dataset item should include field 'path'" " - path to audio file."
+            assert "img_path" in entry, (
+                "Each dataset item should include field 'img_path'" " - path to image file."
             )
-            assert "label" in entry, (
-                "Each dataset item should include field 'label'"
-                " - object ground-truth label."
+            assert "caption" in entry, (
+                "Each dataset item should include field 'caption'"
+                " - caption corresponding to the image."
             )
 
     @staticmethod

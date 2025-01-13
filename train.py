@@ -8,6 +8,7 @@ from omegaconf import OmegaConf
 from src.datasets.data_utils import get_dataloaders
 from src.trainer import Trainer
 from src.utils.init_utils import set_random_seed, setup_saving_and_logging
+import itertools
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -38,7 +39,7 @@ def main(config):
     dataloaders, batch_transforms = get_dataloaders(config, device)
 
     # build model architecture, then print to console
-    model = instantiate(config.model).to(device)
+    model = instantiate(config.model)
     logger.info(model)
 
     # get function handles of loss and metrics
@@ -46,9 +47,12 @@ def main(config):
     metrics = instantiate(config.metrics)
 
     # build optimizer, learning rate scheduler
-    trainable_params = filter(lambda p: p.requires_grad, model.parameters())
+    trainable_params = filter(lambda p: p.requires_grad, itertools.chain(model.unet.parameters(), model.id_encoder.parameters()))
     optimizer = instantiate(config.optimizer, params=trainable_params)
-    lr_scheduler = instantiate(config.lr_scheduler, optimizer=optimizer)
+    if config.lr_scheduler['_target_'] != None:
+        lr_scheduler = instantiate(config.lr_scheduler) 
+    else:
+        lr_scheduler = None
 
     # epoch_len = number of iterations for iteration-based training
     # epoch_len = None or len(dataloader) for epoch-based training

@@ -35,6 +35,9 @@ wheels/
 pip-log.txt
 pip-delete-this-directory.txt
 
+my_example.py
+denis_example.py
+
 # Unit test / coverage reports
 htmlcov/
 .tox/
@@ -102,6 +105,7 @@ ENV/
 
 # input data, saved log, checkpoints, hydra outputs
 data/
+meladze_set/
 input/
 saved/
 wandb/

@@ -1,0 +1,1 @@
+from src.model.photomaker.model import PhotoMaker
