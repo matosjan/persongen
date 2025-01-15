@@ -1,5 +1,4 @@
 _target_: src.model.PhotoMaker
 pretrained_model_name_or_path: 'stabilityai/stable-diffusion-xl-base-1.0'
-pretrained_vae_model_name_or_path: null
 rank: 3
 weight_dtype: fp16

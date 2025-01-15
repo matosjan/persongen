@@ -8,6 +8,14 @@ from tqdm.auto import tqdm
 from src.datasets.data_utils import inf_loop
 from src.metrics.tracker import MetricTracker
 from src.utils.io_utils import ROOT_PATH
+from peft.utils import get_peft_model_state_dict
+from diffusers.utils import (
+    check_min_version,
+    convert_state_dict_to_diffusers,
+    convert_unet_state_dict_to_peft,
+    is_wandb_available,
+)
+from diffusers import StableDiffusionXLPipeline
 
 
 class BaseTrainer:
@@ -198,7 +206,6 @@ class BaseTrainer:
                 this epoch.
         """
         self.is_train = True
-        # self.model.train()
         self.train_metrics.reset()
         self.writer.set_step((epoch - 1) * self.epoch_len)
         self.writer.add_scalar("epoch", epoch)
@@ -464,6 +471,17 @@ class BaseTrainer:
                 checkpoint-epochEpochNumber.pth)
         """
         arch = type(self.model).__name__
+        unet_lora_layers_to_save = convert_state_dict_to_diffusers(get_peft_model_state_dict(self.model.unet))
+        # StableDiffusionXLPipeline.save_lora_weights(
+        #     './',
+        #     unet_lora_layers=unet_lora_layers_to_save,
+        #     text_encoder_lora_layers=None,
+        #     text_encoder_2_lora_layers=None,
+        # )
+        # print(unet_lora_layers_to_save.keys())
+        torch.save(unet_lora_layers_to_save, 'test.pth')
+        exit(0)
+
         state = {
             "arch": arch,
             "epoch": epoch,

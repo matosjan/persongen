@@ -63,7 +63,7 @@ class BaseDataset(Dataset):
         caption = data_dict["caption"]
 
         ref_images = []
-        num_ref_images = random.randint(1, 4)
+        num_ref_images = 2
         used_indexes = {ind}
         while len(ref_images) != num_ref_images:
             new_ref_idx = random.randint(0, len(self.image_paths) - 1)
