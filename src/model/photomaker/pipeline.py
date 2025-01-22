@@ -53,6 +53,12 @@ if is_torch_xla_available():
     XLA_AVAILABLE = True
 else:
     XLA_AVAILABLE = False
+from diffusers.utils import (
+    convert_state_dict_to_diffusers,
+    convert_unet_state_dict_to_peft,
+)
+from peft.utils import get_peft_model_state_dict
+
 
 
 from src.model.photomaker.id_encoder import PhotoMakerIDEncoder # PhotoMaker v1)
@@ -204,6 +210,7 @@ class PhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
                 user_agent=user_agent,
             )
             if weight_name.endswith(".safetensors"):
+                print('lol')
                 state_dict = {"id_encoder": {}, "lora_weights": {}}
                 with safe_open(model_file, framework="pt", device="cpu") as f:
                     for key in f.keys():
@@ -212,9 +219,13 @@ class PhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
                         elif key.startswith("lora_weights."):
                             state_dict["lora_weights"][key.replace("lora_weights.", "")] = f.get_tensor(key)
             else:
+                print('gay')
                 state_dict = torch.load(model_file, map_location="cpu")
+                print(state_dict.keys())
         else:
+            print('shit')
             state_dict = pretrained_model_name_or_path_or_dict
+        # exit(0)
 
         keys = list(state_dict.keys())
         if keys != ["id_encoder", "lora_weights"]:
@@ -232,14 +243,27 @@ class PhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
             # id_encoder = PhotoMakerIDEncoder_CLIPInsightfaceExtendtoken()
         else:
             raise NotImplementedError(f"The PhotoMaker version [{pm_version}] does not support")
-
+        # print(state_dict["id_encoder"].keys())
+        # exit(0)
         id_encoder.load_state_dict(state_dict["id_encoder"], strict=True)
         id_encoder = id_encoder.to(self.device, dtype=self.unet.dtype)    
         self.id_encoder = id_encoder
 
         # load lora into models
+        # torch.save(state_dict["lora_weights"], 'their_lora.pth')
+        # exit(0)
         print(f"Loading PhotoMaker {pm_version} components [2] lora_weights from [{pretrained_model_name_or_path_or_dict}]")
         self.load_lora_weights(state_dict["lora_weights"], adapter_name="photomaker")
+        # print(self.unet)
+        # exit(0)
+        # lora_weights = convert_state_dict_to_diffusers(get_peft_model_state_dict(self.unet, adapter_name='photomaker'))
+        # id_encoder_state_dict = self.id_encoder.state_dict()
+
+        # torch.save({
+        #     'lora_weights': lora_weights,
+        #     'id_encoder': id_encoder_state_dict,
+        # }, 'their_size.pth')
+        # exit(0)
 
         # Add trigger word token
         if self.tokenizer is not None: 

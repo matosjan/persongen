@@ -63,7 +63,7 @@ class BaseDataset(Dataset):
         caption = data_dict["caption"]
 
         ref_images = []
-        num_ref_images = 2
+        num_ref_images = random.randint(1, 4)
         used_indexes = {ind}
         while len(ref_images) != num_ref_images:
             new_ref_idx = random.randint(0, len(self.image_paths) - 1)
@@ -79,7 +79,6 @@ class BaseDataset(Dataset):
             "crop_top_lefts": (0, 0),
         }
         instance_data = self.preprocess_data(instance_data)
-        print(instance_data['pixel_values'].shape)
         return instance_data
 
     def __len__(self):
@@ -116,7 +115,6 @@ class BaseDataset(Dataset):
         """
         if self.instance_transforms is not None:
             for transform_name in self.instance_transforms.keys():
-                print('goool', transform_name)
                 instance_data[transform_name] = self.instance_transforms[
                     transform_name
                 ](instance_data[transform_name])

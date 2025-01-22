@@ -2,7 +2,7 @@ from itertools import repeat
 
 from hydra.utils import instantiate
 
-from src.datasets.collate import collate_fn
+from src.datasets.collate import collate_fn, collate_fn_val
 from src.utils.init_utils import set_worker_seed
 
 
@@ -69,16 +69,16 @@ def get_dataloaders(config, device):
     dataloaders = {}
     for dataset_partition in config.datasets.keys():
         dataset = datasets[dataset_partition]
-
-        assert config.dataloader.batch_size <= len(dataset), (
+        print(dataset_partition)
+        assert config.dataloader[dataset_partition].batch_size <= len(dataset), (
             f"The batch size ({config.dataloader.batch_size}) cannot "
             f"be larger than the dataset length ({len(dataset)})"
         )
 
         partition_dataloader = instantiate(
-            config.dataloader,
+            config.dataloader[dataset_partition],
             dataset=dataset,
-            collate_fn=collate_fn,
+            collate_fn=collate_fn if dataset_partition == "train" else collate_fn_val,
             drop_last=(dataset_partition == "train"),
             shuffle=(dataset_partition == "train"),
             worker_init_fn=set_worker_seed,

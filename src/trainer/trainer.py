@@ -3,6 +3,7 @@ import torch.nn.functional as F
 
 from src.metrics.tracker import MetricTracker
 from src.trainer.base_trainer import BaseTrainer
+import itertools
 
 
 class Trainer(BaseTrainer):
@@ -38,7 +39,9 @@ class Trainer(BaseTrainer):
             self.optimizer.zero_grad()
             
         #######################
-        output = self.model.forward(**batch)
+        do_cfg =  (torch.rand(1) < 0.1).item()
+        # masked_loss = (torch.rand(1) < 0.5).item()
+        output = self.model.forward(**batch, do_cfg=do_cfg)
         batch.update(output)
 
         #######################
@@ -47,7 +50,6 @@ class Trainer(BaseTrainer):
 
         if self.is_train:
             batch["loss"].backward()  # sum of all losses is always called loss
-            print(batch['loss'])
             self._clip_grad_norm()
             self.optimizer.step()
             if self.lr_scheduler is not None:
@@ -60,6 +62,25 @@ class Trainer(BaseTrainer):
         for met in metric_funcs:
             metrics.update(met.name, met(**batch))
         return batch
+    
+    def process_evaluation_batch(self, batch, metrics: MetricTracker):
+        print(batch['ref_images'])
+        for ref_num in range(1, 4):
+            refs = itertools.combinations(batch['ref_images'], ref_num)
+            
+            for i, input_id_images in enumerate(refs):
+                generated_image = self.pipe(
+                    prompt=batch['prompt'],
+                    input_id_images=list(input_id_images),
+                    negative_prompt=None,
+                    num_images_per_prompt=1,
+                    num_inference_steps=50,
+                    start_merge_step=10,
+                ).images[0]
+                batch[f'{i}. {ref_num} refs'] = list(input_id_images) + [generated_image]
+        return batch
+        
+
 
     def _log_batch(self, batch_idx, batch, mode="train"):
         """
@@ -82,4 +103,9 @@ class Trainer(BaseTrainer):
             pass
         else:
             # Log Stuff
-            pass
+            print(batch)
+            prompt = batch['prompt']
+            for key, val in batch.items():
+                if key == 'prompt' or key == 'ref_images':
+                    continue
+                self.writer.add_images(f'{key} <{prompt[:30]}...>', val)

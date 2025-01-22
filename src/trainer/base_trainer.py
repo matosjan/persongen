@@ -26,6 +26,7 @@ class BaseTrainer:
     def __init__(
         self,
         model,
+        pipe,
         criterion,
         metrics,
         optimizer,
@@ -75,6 +76,7 @@ class BaseTrainer:
         self.log_step = config.trainer.get("log_step", 50)
 
         self.model = model
+        self.pipe = pipe
         self.criterion = criterion
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
@@ -235,9 +237,12 @@ class BaseTrainer:
                         epoch, self._progress(batch_idx), batch["loss"].item()
                     )
                 )
-                # self.writer.add_scalar(
-                #     "learning rate", self.lr_scheduler.get_last_lr()[0]
-                # )
+                self.writer.add_scalar(
+                    "learning rate for lora layers", self.lr_scheduler.get_last_lr()[0]
+                )
+                self.writer.add_scalar(
+                    "learning rate for other modules", self.lr_scheduler.get_last_lr()[1]
+                )
                 self._log_scalars(self.train_metrics)
                 self._log_batch(batch_idx, batch)
                 # we don't want to reset train metrics at the start of every epoch
@@ -268,24 +273,29 @@ class BaseTrainer:
             logs (dict): logs that contain the information about evaluation.
         """
         self.is_train = False
-        self.model.eval()
+        # self.model.eval()
         self.evaluation_metrics.reset()
+        self.pipe.to(self.device)
+        self.pipe.load_photomaker_adapter(
+            self.model.state_dict(),
+            trigger_word="img"
+        )
+        self.writer.set_step(epoch * self.epoch_len, part)
         with torch.no_grad():
             for batch_idx, batch in tqdm(
                 enumerate(dataloader),
                 desc=part,
                 total=len(dataloader),
             ):
-                batch = self.process_batch(
+                batch = self.process_evaluation_batch(
                     batch,
                     metrics=self.evaluation_metrics,
                 )
-            self.writer.set_step(epoch * self.epoch_len, part)
-            self._log_scalars(self.evaluation_metrics)
-            self._log_batch(
-                batch_idx, batch, part
-            )  # log only the last batch during inference
-
+                self._log_batch(
+                    batch_idx, batch, part
+                )  # log only the last batch during inference
+            # self._log_scalars(self.evaluation_metrics)
+        self.pipe.to('cpu')
         return self.evaluation_metrics.result()
 
     def _monitor_performance(self, logs, not_improved_count):
@@ -471,26 +481,17 @@ class BaseTrainer:
                 checkpoint-epochEpochNumber.pth)
         """
         arch = type(self.model).__name__
-        unet_lora_layers_to_save = convert_state_dict_to_diffusers(get_peft_model_state_dict(self.model.unet))
-        # StableDiffusionXLPipeline.save_lora_weights(
-        #     './',
-        #     unet_lora_layers=unet_lora_layers_to_save,
-        #     text_encoder_lora_layers=None,
-        #     text_encoder_2_lora_layers=None,
-        # )
-        # print(unet_lora_layers_to_save.keys())
-        torch.save(unet_lora_layers_to_save, 'test.pth')
-        exit(0)
-
         state = {
             "arch": arch,
             "epoch": epoch,
             "state_dict": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
-            "lr_scheduler": self.lr_scheduler.state_dict(),
+            # "lr_scheduler": self.lr_scheduler.state_dict(),
             "monitor_best": self.mnt_best,
             "config": self.config,
         }
+        # torch.save(self.model.state_dict(), 'check_size_64.pth')
+        # exit(0)
         filename = str(self.checkpoint_dir / f"checkpoint-epoch{epoch}.pth")
         if not (only_best and save_best):
             torch.save(state, filename)

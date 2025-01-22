@@ -220,8 +220,11 @@ class WandBWriter:
             step=self.step,
         )
 
-    def add_images(self, image_names, images):
-        raise NotImplementedError()
+    def add_images(self, images_name, images):
+        self.wandb.log(
+            {(images_name): [self.wandb.Image(image) for image in images]},
+            step=self.step,
+        )
 
     def add_pr_curve(self, curve_name, curve):
         raise NotImplementedError()

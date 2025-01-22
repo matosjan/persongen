@@ -4,6 +4,8 @@ import hydra
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
+from src.model.photomaker.our_pipeline import OurPhotoMakerStableDiffusionXLPipeline
+from diffusers import EulerDiscreteScheduler
 
 from src.datasets.data_utils import get_dataloaders
 from src.trainer import Trainer
@@ -42,17 +44,31 @@ def main(config):
     model = instantiate(config.model)
     logger.info(model)
 
+    # build pipeline for validation
+    pipe = OurPhotoMakerStableDiffusionXLPipeline.from_pretrained(
+        'stabilityai/stable-diffusion-xl-base-1.0',  # can change to any base model based on SDXL
+        torch_dtype=torch.float16, 
+        use_safetensors=True, 
+        variant="fp16"
+    )
+
+    pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+
     # get function handles of loss and metrics
     loss_function = instantiate(config.loss_function).to(device)
     metrics = instantiate(config.metrics)
 
     # build optimizer, learning rate scheduler
-    trainable_params = filter(lambda p: p.requires_grad, itertools.chain(model.unet.parameters(), model.id_encoder.parameters()))
+    lora_params = filter(lambda p: p.requires_grad, model.unet.parameters())
+    other_params =  filter(lambda p: p.requires_grad, model.id_encoder.parameters())
+    trainable_params = [
+        {'params': lora_params, 'lr': config.lr_for_lora},
+        {'params': other_params, 'lr': config.lr_for_other}
+    ]
+
     optimizer = instantiate(config.optimizer, params=trainable_params)
-    if config.lr_scheduler['_target_'] != None:
-        lr_scheduler = instantiate(config.lr_scheduler) 
-    else:
-        lr_scheduler = None
+
+    lr_scheduler = instantiate(config.lr_scheduler, optimizer=optimizer) 
 
     # epoch_len = number of iterations for iteration-based training
     # epoch_len = None or len(dataloader) for epoch-based training
@@ -60,6 +76,7 @@ def main(config):
 
     trainer = Trainer(
         model=model,
+        pipe=pipe,
         criterion=loss_function,
         metrics=metrics,
         optimizer=optimizer,

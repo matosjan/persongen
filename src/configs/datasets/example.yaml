@@ -3,3 +3,9 @@ train:
   images_dir_path: /home/aamatosyan/pers-diffusion/OurPhotoMaker/meladze_set/images
   captions_path: /home/aamatosyan/pers-diffusion/OurPhotoMaker/meladze_set/meladze_gemini_captions.txt
   instance_transforms: ${transforms.instance_transforms.train}
+
+val:
+  _target_: src.datasets.MeladzeValDataset
+  images_dir_path: /home/aamatosyan/pers-diffusion/OurPhotoMaker/meladze_set/images_val
+  prompts_path: /home/aamatosyan/pers-diffusion/OurPhotoMaker/meladze_set/meladze_val_prompts.txt
+

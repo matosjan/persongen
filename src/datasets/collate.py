@@ -28,3 +28,18 @@ def collate_fn(dataset_items: list[dict]):
         "ref_images": ref_images,
     }
     return result_batch
+
+def collate_fn_val(dataset_items: list[dict]):
+    """
+    Collate and pad fields in the dataset items.
+    Converts individual items into a batch.
+
+    Args:
+        dataset_items (list[dict]): list of objects from
+            dataset.__getitem__.
+    Returns:
+        result_batch (dict[Tensor]): dict, containing batch-version
+            of the tensors.
+    """
+
+    return dataset_items[0]
