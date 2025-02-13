@@ -8,5 +8,11 @@ class DiffusionLoss(nn.Module):
         super().__init__()
 
     def forward(self, model_pred, target, **batch):
-        loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+        if isinstance(model_pred, list):
+            loss = 0
+            for i in range(len(model_pred)):
+                loss += F.mse_loss(model_pred[i].float(), target[i].float())
+            loss /= len(model_pred)
+        else:
+            loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
         return {'loss': loss}

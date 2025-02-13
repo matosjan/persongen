@@ -176,10 +176,12 @@ class PhotoMaker():
         add_time_ids = add_time_ids.to("cuda", dtype=torch.float32)
         return add_time_ids
     
-    def forward(self, pixel_values, caption, ref_images, original_sizes, crop_top_lefts, do_cfg=False, masked_loss=False):
+    def forward(self, pixel_values, caption, ref_images, original_sizes, crop_top_lefts, bbox, do_cfg=False, masked_loss=False):
         pixel_values = pixel_values.cuda() # нужно ли?
         model_input = self.vae.encode(pixel_values).latent_dist.sample()
         model_input = model_input * self.vae.config.scaling_factor
+        
+        # print(model_input.shape)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(model_input)
@@ -214,10 +216,10 @@ class PhotoMaker():
 
         prompt_embeds = torch.concat(prompt_embeds_list, dim=0)
         pooled_prompt_embeds = torch.concat(pooled_prompt_embeds_list, dim=0)
-        if not do_cfg:
+        if do_cfg == False:
             class_tokens_mask = torch.concat(class_tokens_mask_list, dim=0)
         #*********************************************************
-        if not do_cfg:
+        if do_cfg == False:
             all_ref_images_in_batch = list(itertools.chain.from_iterable(ref_images))
             id_pixel_values = self.id_image_processor(all_ref_images_in_batch, return_tensors="pt").pixel_values.unsqueeze(0)
             id_pixel_values = id_pixel_values.to(device='cuda', dtype=self.id_encoder.dtype)
@@ -240,7 +242,15 @@ class PhotoMaker():
             return_dict=False,
         )[0]
 
-        target = noise        
+        target = noise
+        # if masked_loss:
+        #     model_pred = torch.split(model_pred, 1, dim=0)
+        #     target = torch.split(target, 1, dim=0)
+        #     for i, box in enumerate(bbox):
+        #         box[0], box[1], box[2], box[3] = box[0] / 4, box[1] / 4, box[2] / 4, box[3] / 4
+        #         model_pred[i] = model_pred[i][:, box[1]:box[3], box[0]:box[2]]
+        #         target[i] = target[i][:, box[1]:box[3], box[0]:box[2]]
+                
         return {
             'model_pred': model_pred,
             'target': target,

@@ -15,7 +15,8 @@ from diffusers.utils import (
     convert_unet_state_dict_to_peft,
     is_wandb_available,
 )
-from diffusers import StableDiffusionXLPipeline
+from src.model.photomaker.our_pipeline import OurPhotoMakerStableDiffusionXLPipeline
+from diffusers import EulerDiscreteScheduler
 
 
 class BaseTrainer:
@@ -26,7 +27,7 @@ class BaseTrainer:
     def __init__(
         self,
         model,
-        pipe,
+        # pipe,
         criterion,
         metrics,
         optimizer,
@@ -76,7 +77,7 @@ class BaseTrainer:
         self.log_step = config.trainer.get("log_step", 50)
 
         self.model = model
-        self.pipe = pipe
+        # self.pipe = pipe
         self.criterion = criterion
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
@@ -275,8 +276,16 @@ class BaseTrainer:
         self.is_train = False
         # self.model.eval()
         self.evaluation_metrics.reset()
-        self.pipe.to(self.device)
-        self.pipe.load_photomaker_adapter(
+        # build pipeline for validation
+        pipe = OurPhotoMakerStableDiffusionXLPipeline.from_pretrained(
+            'stabilityai/stable-diffusion-xl-base-1.0',  # can change to any base model based on SDXL
+            torch_dtype=torch.float16, 
+            use_safetensors=True, 
+            variant="fp16"
+        )
+        pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+        pipe.to(self.device)
+        pipe.load_photomaker_adapter(
             self.model.state_dict(),
             trigger_word="img"
         )
@@ -289,12 +298,13 @@ class BaseTrainer:
             ):
                 batch = self.process_evaluation_batch(
                     batch,
+                    pipe,
                     metrics=self.evaluation_metrics,
                 )
                 self._log_batch(
                     batch_idx, batch, part
                 )  # log only the last batch during inference
-            # self._log_scalars(self.evaluation_metrics)
+            self._log_scalars(self.evaluation_metrics)
         self.pipe.to('cpu')
         return self.evaluation_metrics.result()
 

@@ -210,7 +210,6 @@ class PhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
                 user_agent=user_agent,
             )
             if weight_name.endswith(".safetensors"):
-                print('lol')
                 state_dict = {"id_encoder": {}, "lora_weights": {}}
                 with safe_open(model_file, framework="pt", device="cpu") as f:
                     for key in f.keys():
@@ -219,11 +218,9 @@ class PhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
                         elif key.startswith("lora_weights."):
                             state_dict["lora_weights"][key.replace("lora_weights.", "")] = f.get_tensor(key)
             else:
-                print('gay')
                 state_dict = torch.load(model_file, map_location="cpu")
                 print(state_dict.keys())
         else:
-            print('shit')
             state_dict = pretrained_model_name_or_path_or_dict
         # exit(0)
 

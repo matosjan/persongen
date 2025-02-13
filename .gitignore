@@ -35,9 +35,6 @@ wheels/
 pip-log.txt
 pip-delete-this-directory.txt
 
-my_example.py
-denis_example.py
-
 # Unit test / coverage reports
 htmlcov/
 .tox/
@@ -111,8 +108,22 @@ saved/
 wandb/
 .cometml-runs/
 outputs/
+runs/
 
 # editor, os cache directory
 .vscode/
 .idea/
 __MACOSX/
+
+# other stuff
+my_example.py
+denis_example.py
+run_align.py
+calculate_id.py
+calculate_clip.py
+infer_photomaker.py
+*.ipynb
+*.png
+
+# pretrained models, etc.
+*.pth

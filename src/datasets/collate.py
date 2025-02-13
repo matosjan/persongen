@@ -19,6 +19,7 @@ def collate_fn(dataset_items: list[dict]):
     crop_top_lefts = [example["crop_top_lefts"] for example in dataset_items]
     caption = [example['caption'] for example in dataset_items]
     ref_images = [example['ref_images'] for example in dataset_items]
+    bbox = [example['bbox'] for example in dataset_items]
 
     result_batch = {
         "pixel_values": pixel_values,
@@ -26,6 +27,7 @@ def collate_fn(dataset_items: list[dict]):
         "crop_top_lefts": crop_top_lefts,
         "caption": caption,
         "ref_images": ref_images,
+        "bbox": bbox
     }
     return result_batch
 

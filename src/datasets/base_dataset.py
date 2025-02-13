@@ -19,7 +19,7 @@ class BaseDataset(Dataset):
     """
 
     def __init__(
-        self, index, image_paths, limit=None, shuffle_index=False, instance_transforms=None
+        self, index, limit=None, shuffle_index=False, instance_transforms=None
     ):
         """
         Args:
@@ -35,7 +35,6 @@ class BaseDataset(Dataset):
                 tensor name.
         """
         self._assert_index_is_valid(index)
-        self.image_paths = image_paths
 
         index = self._shuffle_and_limit_index(index, limit, shuffle_index)
         self._index: List[dict] = index
@@ -66,17 +65,22 @@ class BaseDataset(Dataset):
         num_ref_images = random.randint(1, 4)
         used_indexes = {ind}
         while len(ref_images) != num_ref_images:
-            new_ref_idx = random.randint(0, len(self.image_paths) - 1)
+            new_ref_idx = random.randint(0, len(self._index) - 1)
             if new_ref_idx not in used_indexes:
                 used_indexes.add(new_ref_idx)
-                ref_images.append(self.load_object(self.image_paths[new_ref_idx]))
-    
+                ref_images.append(self.load_object(self._index[new_ref_idx]['img_path']))
+        
+        bbox = data_dict['bbox']
+        width_rescale_factor = 512 / img.width
+        height_rescale_factor = 512 / img.height
+        resized_bbox = [bbox[0] / width_rescale_factor, bbox[1] / height_rescale_factor, bbox[2] / width_rescale_factor, bbox[3] / height_rescale_factor]
         instance_data = {
             "pixel_values": img,
             "ref_images": ref_images,
             "caption": caption,
             "original_sizes": (img.height, img.width),
             "crop_top_lefts": (0, 0),
+            "bbox": resized_bbox,
         }
         instance_data = self.preprocess_data(instance_data)
         return instance_data

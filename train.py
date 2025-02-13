@@ -4,8 +4,6 @@ import hydra
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
-from src.model.photomaker.our_pipeline import OurPhotoMakerStableDiffusionXLPipeline
-from diffusers import EulerDiscreteScheduler
 
 from src.datasets.data_utils import get_dataloaders
 from src.trainer import Trainer
@@ -44,16 +42,6 @@ def main(config):
     model = instantiate(config.model)
     logger.info(model)
 
-    # build pipeline for validation
-    pipe = OurPhotoMakerStableDiffusionXLPipeline.from_pretrained(
-        'stabilityai/stable-diffusion-xl-base-1.0',  # can change to any base model based on SDXL
-        torch_dtype=torch.float16, 
-        use_safetensors=True, 
-        variant="fp16"
-    )
-
-    pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
-
     # get function handles of loss and metrics
     loss_function = instantiate(config.loss_function).to(device)
     metrics = instantiate(config.metrics)
@@ -76,7 +64,7 @@ def main(config):
 
     trainer = Trainer(
         model=model,
-        pipe=pipe,
+        # pipe=pipe,
         criterion=loss_function,
         metrics=metrics,
         optimizer=optimizer,

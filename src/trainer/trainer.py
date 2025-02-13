@@ -40,8 +40,8 @@ class Trainer(BaseTrainer):
             
         #######################
         do_cfg =  (torch.rand(1) < 0.1).item()
-        # masked_loss = (torch.rand(1) < 0.5).item()
-        output = self.model.forward(**batch, do_cfg=do_cfg)
+        masked_loss = (torch.rand(1) < 0.5).item()
+        output = self.model.forward(**batch, do_cfg=do_cfg, masked_loss=masked_loss)
         batch.update(output)
 
         #######################
@@ -63,21 +63,25 @@ class Trainer(BaseTrainer):
             metrics.update(met.name, met(**batch))
         return batch
     
-    def process_evaluation_batch(self, batch, metrics: MetricTracker):
+    def process_evaluation_batch(self, batch, pipe, metrics: MetricTracker):
+        # print(batch['ref_images'])
         print(batch['ref_images'])
-        for ref_num in range(1, 4):
-            refs = itertools.combinations(batch['ref_images'], ref_num)
-            
-            for i, input_id_images in enumerate(refs):
-                generated_image = self.pipe(
-                    prompt=batch['prompt'],
-                    input_id_images=list(input_id_images),
-                    negative_prompt=None,
-                    num_images_per_prompt=1,
-                    num_inference_steps=50,
-                    start_merge_step=10,
-                ).images[0]
-                batch[f'{i}. {ref_num} refs'] = list(input_id_images) + [generated_image]
+        generator = torch.Generator(device='cuda').manual_seed(42)
+        generated_image = pipe(
+            prompt=batch['prompt'],
+            input_id_images=list(batch['ref_images']),
+            negative_prompt=None,
+            num_images_per_prompt=1,
+            num_inference_steps=50,
+            start_merge_step=10,
+            generator=generator
+        ).images[0]
+
+        batch[f'generated'] = [generated_image]
+        generated_image.save('goida.png')
+
+        for met in self.metrics['inference']:
+            metrics.update(met.name, met(**batch))
         return batch
         
 
@@ -103,9 +107,6 @@ class Trainer(BaseTrainer):
             pass
         else:
             # Log Stuff
-            print(batch)
             prompt = batch['prompt']
-            for key, val in batch.items():
-                if key == 'prompt' or key == 'ref_images':
-                    continue
-                self.writer.add_images(f'{key} <{prompt[:30]}...>', val)
+            ref_num = len(batch['ref_images'])
+            self.writer.add_images(f'{ref_num} refs <{prompt[:30]}>', batch['ref_images'] + batch['generated'])
