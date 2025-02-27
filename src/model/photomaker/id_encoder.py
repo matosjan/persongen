@@ -46,6 +46,7 @@ class FuseModule(nn.Module):
         self.layer_norm = nn.LayerNorm(embed_dim)
 
     def fuse_fn(self, prompt_embeds, id_embeds):
+        # print(prompt_embeds.shape, id_embeds.shape)
         stacked_id_embeds = torch.cat([prompt_embeds, id_embeds], dim=-1)
         stacked_id_embeds = self.mlp1(stacked_id_embeds) + prompt_embeds
         stacked_id_embeds = self.mlp2(stacked_id_embeds)
@@ -66,11 +67,19 @@ class FuseModule(nn.Module):
         class_tokens_mask = class_tokens_mask.view(-1)
         id_embeds = id_embeds.view(-1, id_embeds.shape[-1])
         # slice out the image token embeddings
+        # print(prompt_embeds.shape)
         image_token_embeds = prompt_embeds[class_tokens_mask]
         stacked_id_embeds = self.fuse_fn(image_token_embeds, id_embeds)
+        # print(prompt_embeds[~class_tokens_mask].shape)
+        print(f'ID embed norm: {torch.norm(id_embeds)}')
+        print(f'Stacked embed norm: {torch.norm(stacked_id_embeds)}')
+        print(f'Class token embed norm: {torch.norm(prompt_embeds[class_tokens_mask])}')
+        print(f'Text embed norm: {torch.norm(prompt_embeds[~class_tokens_mask])}')
         assert class_tokens_mask.sum() == stacked_id_embeds.shape[0], f"{class_tokens_mask.sum()} != {stacked_id_embeds.shape[0]}"
-        prompt_embeds.masked_scatter_(class_tokens_mask[:, None], stacked_id_embeds.to(prompt_embeds.dtype))
+        zeros_embed = torch.zeros_like(stacked_id_embeds)
+        prompt_embeds.masked_scatter_(class_tokens_mask[:, None], zeros_embed.to(prompt_embeds.dtype))
         updated_prompt_embeds = prompt_embeds.view(batch_size, seq_length, -1)
+        print(f'Updated embed norm: {torch.norm(updated_prompt_embeds)}')
         return updated_prompt_embeds
 
 class PhotoMakerIDEncoder(CLIPVisionModelWithProjection):
@@ -80,6 +89,7 @@ class PhotoMakerIDEncoder(CLIPVisionModelWithProjection):
         self.fuse_module = FuseModule(2048)
 
     def forward(self, id_pixel_values, prompt_embeds, class_tokens_mask):
+        # print(id_pixel_values.shape, prompt_embeds.shape, class_tokens_mask.shape)
         _, num_inputs_in_batch, c, h, w = id_pixel_values.shape
         id_pixel_values = id_pixel_values.view(num_inputs_in_batch, c, h, w)
 
@@ -91,7 +101,9 @@ class PhotoMakerIDEncoder(CLIPVisionModelWithProjection):
         id_embeds_2 = id_embeds_2.view(num_inputs_in_batch, 1, -1)  
 
         id_embeds = torch.cat((id_embeds, id_embeds_2), dim=-1)
+        # print(id_embeds.shape)
         updated_prompt_embeds = self.fuse_module(prompt_embeds, id_embeds, class_tokens_mask)
+        print(updated_prompt_embeds.shape)
         return updated_prompt_embeds
 
 

@@ -65,7 +65,7 @@ class Trainer(BaseTrainer):
     
     def process_evaluation_batch(self, batch, pipe, metrics: MetricTracker):
         # print(batch['ref_images'])
-        print(batch['ref_images'])
+        # print(batch['ref_images'])
         generator = torch.Generator(device='cuda').manual_seed(42)
         generated_image = pipe(
             prompt=batch['prompt'],
@@ -78,7 +78,7 @@ class Trainer(BaseTrainer):
         ).images[0]
 
         batch[f'generated'] = [generated_image]
-        generated_image.save('goida.png')
+        # generated_image.save('goida.png')
 
         for met in self.metrics['inference']:
             metrics.update(met.name, met(**batch))
@@ -109,4 +109,4 @@ class Trainer(BaseTrainer):
             # Log Stuff
             prompt = batch['prompt']
             ref_num = len(batch['ref_images'])
-            self.writer.add_images(f'{ref_num} refs <{prompt[:30]}>', batch['ref_images'] + batch['generated'])
+            self.writer.add_images(f'({batch_idx}){ref_num} refs <{prompt[:30]}...>', batch['ref_images'] + batch['generated'])

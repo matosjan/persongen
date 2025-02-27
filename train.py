@@ -24,6 +24,7 @@ def main(config):
         config (DictConfig): hydra experiment config.
     """
     set_random_seed(config.trainer.seed)
+    print(config.model.rank)
 
     project_config = OmegaConf.to_container(config)
     logger = setup_saving_and_logging(config)

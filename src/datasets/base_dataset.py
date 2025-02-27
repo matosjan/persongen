@@ -71,9 +71,9 @@ class BaseDataset(Dataset):
                 ref_images.append(self.load_object(self._index[new_ref_idx]['img_path']))
         
         bbox = data_dict['bbox']
-        width_rescale_factor = 512 / img.width
-        height_rescale_factor = 512 / img.height
-        resized_bbox = [bbox[0] / width_rescale_factor, bbox[1] / height_rescale_factor, bbox[2] / width_rescale_factor, bbox[3] / height_rescale_factor]
+        width_rescale_factor = img.width / 512
+        height_rescale_factor = img.height / 512
+        resized_bbox = [bbox[0] // width_rescale_factor, bbox[1] // height_rescale_factor, bbox[2] // width_rescale_factor, bbox[3] // height_rescale_factor]
         instance_data = {
             "pixel_values": img,
             "ref_images": ref_images,

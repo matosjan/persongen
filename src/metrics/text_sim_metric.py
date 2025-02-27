@@ -20,7 +20,7 @@ class TextSimMetric(BaseMetric):
         Can use external functions (like TorchMetrics) or custom ones.
         """
         prompts = batch['prompt']
-        generated = batch['generated']
+        generated = [batch['generated']]
         all_scores = []
         for prompt, gen_img_list in zip(prompts, generated):
             tokenized_prompt = clip.tokenize([prompt]).to(self.device)

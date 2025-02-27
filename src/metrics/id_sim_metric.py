@@ -13,6 +13,8 @@ class IDSim(BaseMetric):
     def __call__(self, **batch):
         ref_img_cropped, _ = self.aligner([batch['ref_images'][0]])
         generated_img_cropped, _ = self.aligner([batch['generated'][0]])
+        if len(generated_img_cropped) == 0:
+            return 0
         from_data = {}
         from_data["inp_data"] = ref_img_cropped
         from_data["fake_data"] = generated_img_cropped

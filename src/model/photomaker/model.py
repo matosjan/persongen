@@ -243,13 +243,13 @@ class PhotoMaker():
         )[0]
 
         target = noise
-        # if masked_loss:
-        #     model_pred = torch.split(model_pred, 1, dim=0)
-        #     target = torch.split(target, 1, dim=0)
-        #     for i, box in enumerate(bbox):
-        #         box[0], box[1], box[2], box[3] = box[0] / 4, box[1] / 4, box[2] / 4, box[3] / 4
-        #         model_pred[i] = model_pred[i][:, box[1]:box[3], box[0]:box[2]]
-        #         target[i] = target[i][:, box[1]:box[3], box[0]:box[2]]
+        if masked_loss:
+            model_pred = list(torch.split(model_pred, 1, dim=0))
+            target = list(torch.split(target, 1, dim=0))
+            for i, box in enumerate(bbox):
+                box[0], box[1], box[2], box[3] = int(box[0] // 8), int(box[1] // 8), int(box[2] // 8), int(box[3] // 8)
+                model_pred[i] = model_pred[i][:, box[1]:box[3], box[0]:box[2]]
+                target[i] = target[i][:, box[1]:box[3], box[0]:box[2]]
                 
         return {
             'model_pred': model_pred,

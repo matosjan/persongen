@@ -29,6 +29,7 @@ class IDMetric:
         # inp_data = [inp_data]
         # fake_data = [fake_data]
         print(inp_data)
+        print(fake_data)
         id_transform = transforms.Compose(
             [
                 transforms.ToTensor(),

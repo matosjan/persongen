@@ -1,5 +1,6 @@
 device: "auto"
 train: []
+# inference: []
 inference: # metrics that are calculated during inference (eval)
   - _target_: src.metrics.IDSim
     name: "id_sim" # it is better to avoid spaces in names
