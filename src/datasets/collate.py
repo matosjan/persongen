@@ -1,4 +1,5 @@
 import torch
+from src.logger.utils import BaseTimer
 
 
 def collate_fn(dataset_items: list[dict]):

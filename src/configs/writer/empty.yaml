@@ -1,0 +1,4 @@
+_target_: src.logger.EmptyWriter
+run_name: "aboba"
+id_length: 8
+loss_names: ["loss"]

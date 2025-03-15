@@ -1,13 +1,19 @@
 defaults:
-  - model: baseline
+  - model: photomaker
   - metrics: example
-  - datasets: example_eval # we do not want to run inference on training data
+  - datasets: id_dataset # we do not want to run inference on training data
   - dataloader: example
-  - transforms: example
+  - transforms: example_only_instance
   - _self_
 inferencer:
   device_tensors: ["data_object", "labels"] # which tensors should be on device (ex. GPU)
   device: auto # device name or "auto"
-  save_path: "example" # any name here, can be a dataset name
+  save_path: "inference_results" # any name here, can be a dataset name
   seed: 1
   from_pretrained: "saved/model_best.pth" # path to the pretrained model
+validation_args:
+  negative_prompt: "nsfw, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
+  num_images_per_prompt: 5
+  num_inference_steps: 50
+  start_merge_step: 10
+  guidance_scale: 5

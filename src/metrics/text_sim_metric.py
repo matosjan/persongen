@@ -19,20 +19,15 @@ class TextSimMetric(BaseMetric):
         Defines metric calculation logic for a given batch.
         Can use external functions (like TorchMetrics) or custom ones.
         """
-        prompts = batch['prompt']
-        generated = [batch['generated']]
-        all_scores = []
-        for prompt, gen_img_list in zip(prompts, generated):
-            tokenized_prompt = clip.tokenize([prompt]).to(self.device)
-            
-            images = []
-            for gen_img in gen_img_list:
-                prepr_img = self.preprocess(gen_img)
-                images.append(prepr_img)
-            images = torch.stack(images).to(self.device)
-            logits_per_image, logits_per_text = self.model(images, tokenized_prompt)
-            assert len(logits_per_text) == 1 and len(logits_per_text[0]) == images.shape[0], (logits_per_text.shape, images.shape)
-            scores_for_prompt = list(logits_per_text[0].cpu().numpy())
-            all_scores.extend(scores_for_prompt)
+        prompt = batch['prompt']
+        tokenized_prompt = clip.tokenize([prompt]).to(self.device)
+        generated = batch['generated']
+        assert type(generated) is list, type(generated) # list of PIL.Image
+        assert type(prompt) is str, type(prompt)
 
-        return np.mean(all_scores)
+            
+        score = 0
+        preprecessed = [self.preprocess(img) for img in generated]
+        images = torch.stack(preprecessed).to(self.device) 
+        logits_per_image, logits_per_text = self.model(images, tokenized_prompt)
+        return logits_per_text.mean()

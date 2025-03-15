@@ -1,9 +1,12 @@
 import torch
+import numpy as np
+from PIL import Image
 import torch.nn.functional as F
 
 from src.metrics.tracker import MetricTracker
 from src.trainer.base_trainer import BaseTrainer
 import itertools
+from src.logger.utils import BaseTimer
 
 
 class Trainer(BaseTrainer):
@@ -30,8 +33,6 @@ class Trainer(BaseTrainer):
                 the dataloader (possibly transformed via batch transform),
                 model outputs, and losses.
         """
-        # batch = self.move_batch_to_device(batch)
-        # batch = self.transform_batch(batch)  # transform batch on device -- faster
 
         metric_funcs = self.metrics["inference"]
         if self.is_train:
@@ -47,6 +48,7 @@ class Trainer(BaseTrainer):
         #######################
         all_losses = self.criterion(**batch)
         batch.update(all_losses)
+        assert torch.isfinite(batch["loss"])
 
         if self.is_train:
             batch["loss"].backward()  # sum of all losses is always called loss
@@ -57,31 +59,26 @@ class Trainer(BaseTrainer):
 
         # update metrics for each loss (in case of multiple losses)
         for loss_name in self.config.writer.loss_names:
-            metrics.update(loss_name, batch[loss_name].item())
+            metrics.update("train/" + loss_name, batch[loss_name].item())
 
         for met in metric_funcs:
-            metrics.update(met.name, met(**batch))
+            metrics.update("train/" + met.name, met(**batch))
+
         return batch
     
-    def process_evaluation_batch(self, batch, pipe, metrics: MetricTracker):
-        # print(batch['ref_images'])
-        # print(batch['ref_images'])
+    def process_evaluation_batch(self, batch, pipe=None, metrics = None):
         generator = torch.Generator(device='cuda').manual_seed(42)
-        generated_image = pipe(
+        generated_images = self.pipe(
             prompt=batch['prompt'],
             input_id_images=list(batch['ref_images']),
-            negative_prompt=None,
-            num_images_per_prompt=1,
-            num_inference_steps=50,
-            start_merge_step=10,
-            generator=generator
-        ).images[0]
+            generator=generator,
+            **self.config.validation_args
+        ).images
 
-        batch[f'generated'] = [generated_image]
-        # generated_image.save('goida.png')
+        batch[f'generated'] = generated_images
 
         for met in self.metrics['inference']:
-            metrics.update(met.name, met(**batch))
+            metrics.update("val/" + met.name, met(**batch))
         return batch
         
 
@@ -109,4 +106,14 @@ class Trainer(BaseTrainer):
             # Log Stuff
             prompt = batch['prompt']
             ref_num = len(batch['ref_images'])
-            self.writer.add_images(f'({batch_idx}){ref_num} refs <{prompt[:30]}...>', batch['ref_images'] + batch['generated'])
+            assert len(batch['ref_images']) == 1, len(batch['ref_images'])
+
+            ref_img = batch['ref_images'][0]
+            generated_img = batch['generated'][0]
+
+            image_arrays = [np.array(ref_img.resize((256, 256))), np.array(generated_img.resize((256, 256)))]
+            concated_image = Image.fromarray(np.concatenate(image_arrays, axis=1))
+
+            image_name = f"val_images/{batch['id']}/{batch['image_name']}/{prompt[:30]}..."
+            self.writer.add_image(image_name, concated_image)
+

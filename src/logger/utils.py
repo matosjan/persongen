@@ -3,6 +3,7 @@ import io
 import matplotlib.pyplot as plt
 import PIL
 from torchvision.transforms import ToTensor
+import torch
 
 plt.switch_backend("agg")  # fix RuntimeError: main thread is not in main loop
 
@@ -40,3 +41,15 @@ def plot_images(imgs, config):
     plt.close()
 
     return image
+
+
+class BaseTimer:
+    def __init__(self):
+        self.start = torch.cuda.Event(enable_timing=True)
+        self.end = torch.cuda.Event(enable_timing=True)
+        self.start.record()
+
+    def stop(self):
+        self.end.record()
+        torch.cuda.synchronize()
+        return self.start.elapsed_time(self.end) / 1000

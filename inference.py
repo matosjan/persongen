@@ -34,14 +34,13 @@ def main(config):
     dataloaders, batch_transforms = get_dataloaders(config, device)
 
     # build model architecture, then print to console
-    model = instantiate(config.model).to(device)
-    print(model)
+    model = instantiate(config.model)
 
     # get metrics
     metrics = instantiate(config.metrics)
 
     # save_path for model predictions
-    save_path = ROOT_PATH / "data" / "saved" / config.inferencer.save_path
+    save_path = ROOT_PATH / "inference_results" / config.inferencer.save_path
     save_path.mkdir(exist_ok=True, parents=True)
 
     inferencer = Inferencer(

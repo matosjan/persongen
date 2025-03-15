@@ -2,7 +2,7 @@ defaults:
   - model: photomaker
   - writer: wandb
   - metrics: example
-  - datasets: example
+  - datasets: id_dataset
   - dataloader: example
   - transforms: example_only_instance
   - _self_
@@ -20,13 +20,20 @@ loss_function:
 trainer:
   log_step: 50
   n_epochs: 72
-  epoch_len: 1
+  epoch_len: 50
   # device_tensors: ["pixel_values"] # which tensors should be on device (ex. GPU)
   resume_from: null # null or path to the checkpoint dir with *.pth and config.yaml
   device: auto # device name or "auto"
   override: True # if True, will override the previous run with the same name
   monitor: "off" #"max test_MulticlassAccuracy" # "off" or "max/min metric_name", i.e. our goal is to maximize/minimize metric
-  save_period: 6 # checkpoint each save_period epochs in addition to the best epoch
+  save_period: 5 # checkpoint each save_period epochs in addition to the best epoch
   early_stop: ${trainer.n_epochs} # epochs for early stopping
   save_dir: "saved"
   seed: 42
+validation_args:
+  negative_prompt: "nsfw, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
+  num_images_per_prompt: 5
+  num_inference_steps: 50
+  start_merge_step: 10
+  guidance_scale: 5
+

@@ -13,10 +13,8 @@ class IDMetric:
         self,
         n_threads=8,
     ):  
-        self.curricular_face_path = "/home/aamatosyan/pers-diffusion/OurPhotoMaker/src/id_utils/CurricularFace_Backbone.pth"
+        self.curricular_face_path = "/home/dnbobkov/StyleFeatureEditor/pretrained_models/CurricularFace_Backbone.pth"
         self.n_threads = n_threads
-        torch.multiprocessing.set_start_method("spawn")
-
 
         self.facenet = IR_101(input_size=112)
         self.facenet.load_state_dict(torch.load(self.curricular_face_path))

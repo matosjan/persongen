@@ -8,17 +8,12 @@ from src.id_utils.aligner import Aligner
 from PIL import Image
 import numpy as np
 
+
 class MeladzeDataset(BaseDataset):
     def __init__(self, images_dir_path=None, captions_path=None, index_path=None, *args, **kwargs):
         if os.path.exists(index_path):
             with open(index_path, 'r') as f:
                 index = json.load(f)
-            # for i, a in enumerate(index):
-            #     im = np.array(Image.open(index[i]['img_path']).convert("RGB"))
-            #     b = index[i]['bbox']
-            #     im = im[b[1]: b[3], b[0]: b[2]]
-            #     cropped_img = Image.fromarray(im)
-            #     cropped_img.save(f'/home/aamatosyan/pers-diffusion/OurPhotoMaker/meladze_set/croppes/{i}.png')
 
         else:
             aligner = Aligner()
@@ -37,3 +32,48 @@ class MeladzeDataset(BaseDataset):
                 json.dump(index, f, indent=2)
             
         super().__init__(index, *args, **kwargs)
+
+
+    def __getitem__(self, ind):
+        """
+        Get element from the index, preprocess it, and combine it
+        into a dict.
+
+        Notice that the choice of key names is defined by the template user.
+        However, they should be consistent across dataset getitem, collate_fn,
+        loss_function forward method, and model forward method.
+
+        Args:
+            ind (int): index in the self.index list.
+        Returns:
+            instance_data (dict): dict, containing instance
+                (a single dataset element).
+        """
+        data_dict = self._index[ind]
+        img_path = data_dict["img_path"]
+        img = self.load_object(img_path)
+        caption = data_dict["caption"]
+
+        ref_images = []
+        num_ref_images = random.randint(1, 4)
+        used_indexes = {ind}
+        while len(ref_images) != num_ref_images:
+            new_ref_idx = random.randint(0, len(self._index) - 1)
+            if new_ref_idx not in used_indexes:
+                used_indexes.add(new_ref_idx)
+                ref_images.append(self.load_object(self._index[new_ref_idx]['img_path']))
+        
+        bbox = data_dict['bbox']
+        width_rescale_factor = img.width / 512
+        height_rescale_factor = img.height / 512
+        resized_bbox = [bbox[0] // width_rescale_factor, bbox[1] // height_rescale_factor, bbox[2] // width_rescale_factor, bbox[3] // height_rescale_factor]
+        instance_data = {
+            "pixel_values": img,
+            "ref_images": ref_images,
+            "caption": caption,
+            "original_sizes": (img.height, img.width),
+            "crop_top_lefts": (0, 0),
+            "bbox": resized_bbox,
+        }
+        instance_data = self.preprocess_data(instance_data)
+        return instance_data

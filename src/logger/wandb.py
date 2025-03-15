@@ -84,7 +84,7 @@ class WandBWriter:
         else:
             duration = datetime.now() - self.timer
             self.add_scalar(
-                "steps_per_sec", (self.step - previous_step) / duration.total_seconds()
+                f"general/steps_per_sec", (self.step - previous_step) / duration.total_seconds()
             )
             self.timer = datetime.now()
 
@@ -223,6 +223,12 @@ class WandBWriter:
     def add_images(self, images_name, images):
         self.wandb.log(
             {(images_name): [self.wandb.Image(image) for image in images]},
+            step=self.step,
+        )
+
+    def add_image(self, image_name, image):
+        self.wandb.log(
+            {image_name: self.wandb.Image(image)},
             step=self.step,
         )
 

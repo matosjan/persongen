@@ -156,9 +156,10 @@ class PhotoMaker():
     def load_state_dict(self, state_dict):
         self.id_encoder.load_state_dict(state_dict['id_encoder'])
         lora_state_dict = state_dict['lora_weights']
-        unet_state_dict = {f'{k.replace("unet.", "")}': v for k, v in lora_state_dict.items() if k.startswith("unet.")}
+        unet_state_dict = {f'{k.replace("unet.", "")}': v for k, v in lora_state_dict.items()}
         unet_state_dict = convert_unet_state_dict_to_peft(unet_state_dict)
         incompatible_keys = set_peft_model_state_dict(self.unet, unet_state_dict, adapter_name="default")
+
         if incompatible_keys is not None:
             unexpected_keys = getattr(incompatible_keys, "unexpected_keys", None)
             if unexpected_keys:
@@ -166,11 +167,12 @@ class PhotoMaker():
                     f"Loading adapter weights from state_dict led to unexpected keys not found in the model: "
                     f" {unexpected_keys}. "
                 )
+                assert 1 == 0
 
     # time ids
     def compute_time_ids(self, original_size, crops_coords_top_left):
         # Adapted from pipeline.StableDiffusionXLPipeline._get_add_time_ids
-        target_size = (512, 512)
+        target_size = [512, 512]
         add_time_ids = list(original_size + crops_coords_top_left + target_size)
         add_time_ids = torch.tensor([add_time_ids])
         add_time_ids = add_time_ids.to("cuda", dtype=torch.float32)
@@ -234,6 +236,7 @@ class PhotoMaker():
         add_text_embeds = pooled_prompt_embeds
         add_text_embeds = add_text_embeds.to('cuda', dtype=self.unet.dtype)
         added_cond_kwargs = {"text_embeds": add_text_embeds, "time_ids": add_time_ids}
+
         model_pred = self.unet(
             noisy_model_input,
             timesteps,
@@ -248,8 +251,8 @@ class PhotoMaker():
             target = list(torch.split(target, 1, dim=0))
             for i, box in enumerate(bbox):
                 box[0], box[1], box[2], box[3] = int(box[0] // 8), int(box[1] // 8), int(box[2] // 8), int(box[3] // 8)
-                model_pred[i] = model_pred[i][:, box[1]:box[3], box[0]:box[2]]
-                target[i] = target[i][:, box[1]:box[3], box[0]:box[2]]
+                model_pred[i] = model_pred[i][0, :, box[1]:box[3], box[0]:box[2]]
+                target[i] = target[i][0, :, box[1]:box[3], box[0]:box[2]]
                 
         return {
             'model_pred': model_pred,

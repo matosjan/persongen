@@ -16,7 +16,10 @@ from diffusers.utils import (
     is_wandb_available,
 )
 from src.model.photomaker.our_pipeline import OurPhotoMakerStableDiffusionXLPipeline
+from src.model.photomaker.pipeline_orig import PhotoMakerStableDiffusionXLPipeline
 from diffusers import EulerDiscreteScheduler
+from src.logger.utils import BaseTimer
+from itertools import chain
 
 
 class BaseTrainer:
@@ -128,17 +131,17 @@ class BaseTrainer:
 
         # define metrics
         self.metrics = metrics
+        train_metrics_names = ["train/" + m for m in self.config.writer.loss_names] + ["train/grad_norm"] + ["train/" + m.name for m in self.metrics["train"]]
         self.train_metrics = MetricTracker(
-            *self.config.writer.loss_names,
-            "grad_norm",
-            *[m.name for m in self.metrics["train"]],
+            *train_metrics_names,
             writer=self.writer,
         )
+        val_metrics_names = ["val/" + m for m in self.config.writer.loss_names] + ["val/" + m.name for m in self.metrics["inference"]]
         self.evaluation_metrics = MetricTracker(
-            *self.config.writer.loss_names,
-            *[m.name for m in self.metrics["inference"]],
+            *val_metrics_names,
             writer=self.writer,
         )
+
 
         # define checkpoint dir and init everything if required
 
@@ -152,6 +155,13 @@ class BaseTrainer:
 
         if config.trainer.get("from_pretrained") is not None:
             self._from_pretrained(config.trainer.get("from_pretrained"))
+
+        self.pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
+            'stabilityai/stable-diffusion-xl-base-1.0', #'SG161222/RealVisXL_V3.0',  
+            torch_dtype=torch.float16, 
+            use_safetensors=True, 
+            variant="fp16"
+        )
 
     def train(self):
         """
@@ -208,13 +218,24 @@ class BaseTrainer:
             logs (dict): logs that contain the average loss and metric in
                 this epoch.
         """
+
+        logs = {}
         self.is_train = True
         self.train_metrics.reset()
         self.writer.set_step((epoch - 1) * self.epoch_len)
-        self.writer.add_scalar("epoch", epoch)
+        self.writer.add_scalar("general/epoch", epoch)
+
+        if epoch == 1:
+            for part, dataloader in self.evaluation_dataloaders.items():
+                val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
+                logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
+            self.is_train = True
+
+
         for batch_idx, batch in enumerate(
             tqdm(self.train_dataloader, desc="train", total=self.epoch_len)
-        ):
+        ):  
+            
             try:
                 batch = self.process_batch(
                     batch,
@@ -228,7 +249,7 @@ class BaseTrainer:
                 else:
                     raise e
 
-            self.train_metrics.update("grad_norm", self._get_grad_norm())
+            self.train_metrics.update("train/grad_norm", self._get_grad_norm())
 
             # log current results
             if batch_idx % self.log_step == 0:
@@ -239,12 +260,12 @@ class BaseTrainer:
                     )
                 )
                 self.writer.add_scalar(
-                    "learning rate for lora layers", self.lr_scheduler.get_last_lr()[0]
+                    "general/lr for lora layers", self.lr_scheduler.get_last_lr()[0]
                 )
                 self.writer.add_scalar(
-                    "learning rate for other modules", self.lr_scheduler.get_last_lr()[1]
+                    "general/lr for other modules", self.lr_scheduler.get_last_lr()[1]
                 )
-                self._log_scalars(self.train_metrics)
+                self._log_scalars(self.train_metrics, part="train/")
                 self._log_batch(batch_idx, batch)
                 # we don't want to reset train metrics at the start of every epoch
                 # because we are interested in recent train metrics
@@ -253,10 +274,12 @@ class BaseTrainer:
             if batch_idx + 1 >= self.epoch_len:
                 break
 
-        logs = last_train_metrics
+        logs.update(last_train_metrics)
 
         # Run val/test
         for part, dataloader in self.evaluation_dataloaders.items():
+            self.pipe.unfuse_lora()
+            self.pipe.delete_adapters("photomaker")
             val_logs = self._evaluation_epoch(epoch, part, dataloader)
             logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
 
@@ -274,21 +297,20 @@ class BaseTrainer:
             logs (dict): logs that contain the information about evaluation.
         """
         self.is_train = False
-        # self.model.eval()
         self.evaluation_metrics.reset()
-        # build pipeline for validation
-        pipe = OurPhotoMakerStableDiffusionXLPipeline.from_pretrained(
-            'stabilityai/stable-diffusion-xl-base-1.0',  # can change to any base model based on SDXL
-            torch_dtype=torch.float16, 
-            use_safetensors=True, 
-            variant="fp16"
-        )
-        pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
-        pipe.to(self.device)
-        pipe.load_photomaker_adapter(
+
+        torch.cuda.empty_cache()
+        self.pipe.to(self.device)
+        self.pipe.load_photomaker_adapter(
             self.model.state_dict(),
             trigger_word="img"
         )
+
+        self.pipe.id_encoder.to(self.device)
+        self.pipe.scheduler = EulerDiscreteScheduler.from_config(self.pipe.scheduler.config)
+        self.pipe.fuse_lora()
+        self.pipe.to(self.device)
+
         self.writer.set_step(epoch * self.epoch_len, part)
         with torch.no_grad():
             for batch_idx, batch in tqdm(
@@ -298,14 +320,15 @@ class BaseTrainer:
             ):
                 batch = self.process_evaluation_batch(
                     batch,
-                    pipe,
                     metrics=self.evaluation_metrics,
                 )
                 self._log_batch(
                     batch_idx, batch, part
                 )  # log only the last batch during inference
-            self._log_scalars(self.evaluation_metrics)
-        pipe.to('cpu')
+            self._log_scalars(self.evaluation_metrics, part="")
+        self.pipe.to('cpu')
+        # pipe = None
+        # torch.cuda.empty_cache()
         return self.evaluation_metrics.result()
 
     def _monitor_performance(self, logs, not_improved_count):
@@ -467,7 +490,7 @@ class BaseTrainer:
         """
         return NotImplementedError()
 
-    def _log_scalars(self, metric_tracker: MetricTracker):
+    def _log_scalars(self, metric_tracker: MetricTracker, part=""):
         """
         Wrapper around the writer 'add_scalar' to log all metrics.
 
@@ -477,7 +500,7 @@ class BaseTrainer:
         if self.writer is None:
             return
         for metric_name in metric_tracker.keys():
-            self.writer.add_scalar(f"{metric_name}", metric_tracker.avg(metric_name))
+            self.writer.add_scalar(part + f"{metric_name}", metric_tracker.avg(metric_name))
 
     def _save_checkpoint(self, epoch, save_best=False, only_best=False):
         """

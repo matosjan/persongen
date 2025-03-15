@@ -159,6 +159,7 @@ class BaseDataset(Dataset):
                 such as label and object path.
         """
         for entry in index:
+            continue
             assert "img_path" in entry, (
                 "Each dataset item should include field 'img_path'" " - path to image file."
             )

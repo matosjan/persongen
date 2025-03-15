@@ -1,11 +1,11 @@
 train:
   _target_: src.datasets.MeladzeDataset
-  images_dir_path: /home/aamatosyan/pers-diffusion/OurPhotoMaker/meladze_set/images
-  captions_path: /home/aamatosyan/pers-diffusion/OurPhotoMaker/meladze_set/meladze_gemini_captions.txt
-  index_path: /home/aamatosyan/pers-diffusion/OurPhotoMaker/meladze_set/index.json
+  images_dir_path: /home/dnbobkov/persongen_denis/persongen/meladze_set/images
+  captions_path: /home/dnbobkov/persongen_denis/persongen/meladze_set/new_captions.txt
   instance_transforms: ${transforms.instance_transforms.train}
+  index_path: /home/dnbobkov/persongen_denis/persongen/meladze_set/index.json
 
 val:
   _target_: src.datasets.MeladzeValDataset
-  images_dir_path: /home/aamatosyan/pers-diffusion/OurPhotoMaker/meladze_set/images_val
-  prompts_path: /home/aamatosyan/pers-diffusion/OurPhotoMaker/meladze_set/meladze_val_prompts.txt
+  images_dir_path: /home/dnbobkov/persongen_denis/persongen/meladze_set/images_val
+  prompts_path: /home/dnbobkov/persongen_denis/persongen/meladze_set/val_prompts.txt

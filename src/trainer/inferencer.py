@@ -4,6 +4,10 @@ from tqdm.auto import tqdm
 from src.metrics.tracker import MetricTracker
 from src.trainer.base_trainer import BaseTrainer
 
+from src.model.photomaker.our_pipeline import OurPhotoMakerStableDiffusionXLPipeline
+from src.model.photomaker.pipeline_orig import PhotoMakerStableDiffusionXLPipeline
+from diffusers import EulerDiscreteScheduler
+
 
 class Inferencer(BaseTrainer):
     """
@@ -76,9 +80,11 @@ class Inferencer(BaseTrainer):
         else:
             self.evaluation_metrics = None
 
+
         if not skip_model_load:
             # init model
             self._from_pretrained(config.inferencer.get("from_pretrained"))
+
 
     def run_inference(self):
         """
@@ -89,12 +95,14 @@ class Inferencer(BaseTrainer):
                 for the part_name partition.
         """
         part_logs = {}
-        for part, dataloader in self.evaluation_dataloaders.items():
-            logs = self._inference_part(part, dataloader)
-            part_logs[part] = logs
+
+        dataloader = self.evaluation_dataloaders["val"]
+        logs = self._inference_part("val", dataloader)
+        part_logs["val"] = logs
+
         return part_logs
 
-    def process_batch(self, batch_idx, batch, metrics, part):
+    def process_batch(self, batch_idx, batch, metrics, pipe, part):
         """
         Run batch through the model, compute metrics, and
         save predictions to disk.
@@ -109,46 +117,37 @@ class Inferencer(BaseTrainer):
             metrics (MetricTracker): MetricTracker object that computes
                 and aggregates the metrics. The metrics depend on the type
                 of the partition (train or inference).
-            part (str): name of the partition. Used to define proper saving
-                directory.
+            pipe (SDXLPipeline): Model pipeline to inference it.
         Returns:
             batch (dict): dict-based batch containing the data from
                 the dataloader (possibly transformed via batch transform)
                 and model outputs.
         """
-        batch = self.move_batch_to_device(batch)
-        batch = self.transform_batch(batch)  # transform batch on device -- faster
 
-        outputs = self.model(**batch)
-        batch.update(outputs)
+        generator = torch.Generator(device='cuda').manual_seed(42)
+        generated_images = pipe(
+            prompt=batch['prompt'],
+            input_id_images=list(batch['ref_images']),
+            generator=generator,
+             **self.config.validation_args
+        ).images
 
-        if metrics is not None:
-            for met in self.metrics["inference"]:
-                metrics.update(met.name, met(**batch))
+        batch["generated"] = generated_images
+        prompt_to_path = '_'.join(batch['prompt'][:30].split())
+        id = batch["id"]
+        img_name = batch["image_name"]
 
-        # Some saving logic. This is an example
-        # Use if you need to save predictions on disk
+        save_dir = self.save_path / part / f"{id}/{prompt_to_path}/{img_name}"
+        save_dir.mkdir(exist_ok=True, parents=True)
+        for i, img in enumerate(batch["generated"]):
+            save_pth = save_dir / f"{i}.jpg"
+            img.save(save_pth)
 
-        batch_size = batch["logits"].shape[0]
-        current_id = batch_idx * batch_size
+        for metric in self.metrics['inference']:
+            metrics.update(metric.name, metric(**batch))
+        return batch
 
-        for i in range(batch_size):
-            # clone because of
-            # https://github.com/pytorch/pytorch/issues/1995
-            logits = batch["logits"][i].clone()
-            label = batch["labels"][i].clone()
-            pred_label = logits.argmax(dim=-1)
 
-            output_id = current_id + i
-
-            output = {
-                "pred_label": pred_label,
-                "label": label,
-            }
-
-            if self.save_path is not None:
-                # you can use safetensors or other lib here
-                torch.save(output, self.save_path / part / f"output_{output_id}.pth")
 
         return batch
 
@@ -164,13 +163,27 @@ class Inferencer(BaseTrainer):
         """
 
         self.is_train = False
-        self.model.eval()
-
         self.evaluation_metrics.reset()
 
         # create Save dir
         if self.save_path is not None:
             (self.save_path / part).mkdir(exist_ok=True, parents=True)
+
+
+        pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
+            'stabilityai/stable-diffusion-xl-base-1.0', #'SG161222/RealVisXL_V3.0',  
+            torch_dtype=torch.float16, 
+            use_safetensors=True, 
+            variant="fp16"
+        )
+        pipe.load_photomaker_adapter(
+            self.model.state_dict(),
+            trigger_word="img"
+        )
+        pipe.id_encoder.to(self.device)
+        pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+        pipe.fuse_lora()
+        pipe.to(self.device)
 
         with torch.no_grad():
             for batch_idx, batch in tqdm(
@@ -181,8 +194,10 @@ class Inferencer(BaseTrainer):
                 batch = self.process_batch(
                     batch_idx=batch_idx,
                     batch=batch,
-                    part=part,
+                    pipe=pipe,
                     metrics=self.evaluation_metrics,
+                    part=part
                 )
 
         return self.evaluation_metrics.result()
+

@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import PIL
 
 import torch
+import itertools
 from transformers import CLIPImageProcessor
 
 from safetensors import safe_open
@@ -140,7 +141,7 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
     
 
-class OurPhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
+class OurPhotoMakerStableDiffusionXLPipelineOld(StableDiffusionXLPipeline):
     @validate_hf_hub_args
     def load_photomaker_adapter(
         self,
@@ -245,6 +246,7 @@ class OurPhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
             prompts = [prompt, prompt_2]
             for prompt, tokenizer, text_encoder in zip(prompts, tokenizers, text_encoders):
                 if isinstance(self, TextualInversionLoaderMixin):
+                    print("TextualInversionLoaderMixin")
                     prompt = self.maybe_convert_prompt(prompt, tokenizer)
 
                 text_inputs = tokenizer(
@@ -809,6 +811,505 @@ class OurPhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
 
                 if XLA_AVAILABLE:
                     xm.mark_step()
+
+        if not output_type == "latent":
+            # make sure the VAE is in float32 mode, as it overflows in float16
+            needs_upcasting = self.vae.dtype == torch.float16 and self.vae.config.force_upcast
+
+            if needs_upcasting:
+                self.upcast_vae()
+                latents = latents.to(next(iter(self.vae.post_quant_conv.parameters())).dtype)
+            elif latents.dtype != self.vae.dtype:
+                if torch.backends.mps.is_available():
+                    # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
+                    self.vae = self.vae.to(latents.dtype)
+
+            # unscale/denormalize the latents
+            # denormalize with the mean and std if available and not None
+            has_latents_mean = hasattr(self.vae.config, "latents_mean") and self.vae.config.latents_mean is not None
+            has_latents_std = hasattr(self.vae.config, "latents_std") and self.vae.config.latents_std is not None
+            if has_latents_mean and has_latents_std:
+                latents_mean = (
+                    torch.tensor(self.vae.config.latents_mean).view(1, 4, 1, 1).to(latents.device, latents.dtype)
+                )
+                latents_std = (
+                    torch.tensor(self.vae.config.latents_std).view(1, 4, 1, 1).to(latents.device, latents.dtype)
+                )
+                latents = latents * latents_std / self.vae.config.scaling_factor + latents_mean
+            else:
+                latents = latents / self.vae.config.scaling_factor
+
+            image = self.vae.decode(latents, return_dict=False)[0]
+
+            # cast back to fp16 if needed
+            if needs_upcasting:
+                self.vae.to(dtype=torch.float16)
+        else:
+            image = latents
+            return StableDiffusionXLPipelineOutput(images=image)
+
+        # apply watermark if available
+        # if self.watermark is not None:
+        #     image = self.watermark.apply_watermark(image)
+
+        image = self.image_processor.postprocess(image, output_type=output_type)
+
+        # Offload all models
+        self.maybe_free_model_hooks()
+
+        if not return_dict:
+            return (image,)
+
+        return StableDiffusionXLPipelineOutput(images=image)
+
+
+
+
+
+
+class OurPhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
+    @validate_hf_hub_args
+    def load_photomaker_adapter(
+        self,
+        pretrained_model_path_or_state_dict: str | Dict,
+        trigger_word: str = 'img',
+        pm_version: str = 'v1',
+        **kwargs,
+    ):
+        self.num_tokens = 1 ## this seems ignore the compatibility with v1
+        self.pm_version = pm_version
+        self.trigger_word = trigger_word
+
+        # load finetuned CLIP image encoder and fuse module here if it has not been registered to the pipeline yet
+        self.id_image_processor = CLIPImageProcessor()
+        id_encoder = PhotoMakerIDEncoder()
+
+        if isinstance(pretrained_model_path_or_state_dict, Dict):
+            state_dict = pretrained_model_path_or_state_dict
+        else:
+            state_dict = torch.load(pretrained_model_path_or_state_dict, map_location="cpu")
+        if 'state_dict' in state_dict.keys():
+            state_dict = state_dict['state_dict']
+        
+
+        id_encoder.load_state_dict(state_dict["id_encoder"], strict=True)
+        id_encoder = id_encoder.to(self.device, dtype=self.unet.dtype)    
+        self.id_encoder = id_encoder
+
+        self.load_lora_weights(state_dict["lora_weights"])
+
+        # Add trigger word token
+        self.tokenizer.add_tokens([self.trigger_word], special_tokens=True)
+        self.tokenizer_2.add_tokens([self.trigger_word], special_tokens=True)
+        
+
+    def encode_prompt_with_trigger_word(
+        self,
+        prompt: str,
+        device: Optional[torch.device] = None,
+        prompt_embeds: Optional[torch.Tensor] = None,
+        pooled_prompt_embeds: Optional[torch.Tensor] = None,
+        ### Added args
+        num_id_images: int = 1,
+        class_tokens_mask: Optional[torch.LongTensor] = None,
+    ):
+        device = device or self._execution_device
+
+        # Find the token id of the trigger word
+        image_token_id = self.tokenizer_2.convert_tokens_to_ids(self.trigger_word)
+
+        # Define tokenizers and text encoders
+        tokenizers = [self.tokenizer, self.tokenizer_2] if self.tokenizer is not None else [self.tokenizer_2]
+        text_encoders = (
+            [self.text_encoder, self.text_encoder_2] if self.text_encoder is not None else [self.text_encoder_2]
+        )
+
+        if prompt_embeds is None:
+            # textual inversion: process multi-vector tokens if necessary
+            prompt_embeds_list = []
+            for tokenizer, text_encoder in zip(tokenizers, text_encoders):
+                text_inputs = tokenizer(
+                    prompt,
+                    padding="max_length",
+                    max_length=tokenizer.model_max_length,
+                    truncation=True,
+                    return_tensors="pt",
+                )
+
+                text_input_ids = text_inputs.input_ids 
+                untruncated_ids = tokenizer(prompt, padding="longest", return_tensors="pt").input_ids
+
+                if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(
+                    text_input_ids, untruncated_ids
+                ):
+                    removed_text = tokenizer.batch_decode(untruncated_ids[:, tokenizer.model_max_length - 1 : -1])
+                    print(
+                        "The following part of your input was truncated because CLIP can only handle sequences up to"
+                        f" {tokenizer.model_max_length} tokens: {removed_text}"
+                    )
+
+                clean_index = 0
+                clean_input_ids = []
+                class_token_index = []
+                # Find out the corresponding class word token based on the newly added trigger word token
+                for i, token_id in enumerate(text_input_ids.tolist()[0]):
+                    if token_id == image_token_id:
+                        class_token_index.append(clean_index - 1)
+                    else:
+                        clean_input_ids.append(token_id)
+                        clean_index += 1
+
+                if len(class_token_index) != 1:
+                    raise ValueError(
+                        f"PhotoMaker currently does not support multiple trigger words in a single prompt.\
+                            Trigger word: {self.trigger_word}, Prompt: {prompt}."
+                    )
+                class_token_index = class_token_index[0]
+
+                # Expand the class word token and corresponding mask
+                class_token = clean_input_ids[class_token_index]
+                clean_input_ids = clean_input_ids[:class_token_index] + [class_token] * num_id_images * self.num_tokens + \
+                    clean_input_ids[class_token_index+1:]                
+                    
+                # Truncation or padding
+                max_len = tokenizer.model_max_length
+                if len(clean_input_ids) > max_len:
+                    clean_input_ids = clean_input_ids[:max_len]
+                else:
+                    clean_input_ids = clean_input_ids + [tokenizer.pad_token_id] * (
+                        max_len - len(clean_input_ids)
+                    )
+
+                class_tokens_mask = [True if class_token_index <= i < class_token_index+(num_id_images * self.num_tokens) else False \
+                    for i in range(len(clean_input_ids))]
+                
+                text_input_ids = torch.tensor(clean_input_ids, dtype=torch.long).unsqueeze(0)
+                class_tokens_mask = torch.tensor(class_tokens_mask, dtype=torch.bool).unsqueeze(0)
+                class_tokens_mask = class_tokens_mask.to(device=device)                    
+
+                prompt_embeds = text_encoder(text_input_ids.to(device), output_hidden_states=True)
+
+                # We are only ALWAYS interested in the pooled output of the final text encoder
+                pooled_prompt_embeds = prompt_embeds[0]
+                prompt_embeds = prompt_embeds.hidden_states[-2]
+            
+                prompt_embeds_list.append(prompt_embeds)
+
+            prompt_embeds = torch.concat(prompt_embeds_list, dim=-1)
+
+        prompt_embeds = prompt_embeds.to(device=device)
+        
+
+        bs_embed, _, _ = prompt_embeds.shape
+        pooled_prompt_embeds = pooled_prompt_embeds.view(bs_embed, -1)
+    
+        return prompt_embeds, pooled_prompt_embeds, class_tokens_mask
+
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        prompt: Union[str, List[str]] = None,
+        prompt_2: Optional[Union[str, List[str]]] = None,
+        height: Optional[int] = None,
+        width: Optional[int] = None,
+        num_inference_steps: int = 50,
+        timesteps: List[int] = None,
+        sigmas: List[float] = None,
+        denoising_end: Optional[float] = None,
+        guidance_scale: float = 5.0,
+        negative_prompt: Optional[Union[str, List[str]]] = None,
+        negative_prompt_2: Optional[Union[str, List[str]]] = None,
+        num_images_per_prompt: Optional[int] = 1,
+        eta: float = 0.0,
+        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+        latents: Optional[torch.Tensor] = None,
+        prompt_embeds: Optional[torch.Tensor] = None,
+        negative_prompt_embeds: Optional[torch.Tensor] = None,
+        pooled_prompt_embeds: Optional[torch.Tensor] = None,
+        negative_pooled_prompt_embeds: Optional[torch.Tensor] = None,
+        ip_adapter_image: Optional[PipelineImageInput] = None,
+        ip_adapter_image_embeds: Optional[List[torch.Tensor]] = None,
+        output_type: Optional[str] = "pil",
+        return_dict: bool = True,
+        cross_attention_kwargs: Optional[Dict[str, Any]] = None,
+        guidance_rescale: float = 0.0,
+        original_size: Optional[Tuple[int, int]] = None,
+        crops_coords_top_left: Tuple[int, int] = (0, 0),
+        target_size: Optional[Tuple[int, int]] = None,
+        negative_original_size: Optional[Tuple[int, int]] = None,
+        negative_crops_coords_top_left: Tuple[int, int] = (0, 0),
+        negative_target_size: Optional[Tuple[int, int]] = None,
+        clip_skip: Optional[int] = None,
+        callback_on_step_end: Optional[
+            Union[Callable[[int, int, Dict], None], PipelineCallback, MultiPipelineCallbacks]
+        ] = None,
+        callback_on_step_end_tensor_inputs: List[str] = ["latents"],
+        # Added parameters (for PhotoMaker)
+        input_id_images: PipelineImageInput = None,
+        start_merge_step: int = 10, # TODO: change to `style_strength_ratio` in the future
+        class_tokens_mask: Optional[torch.LongTensor] = None,
+        id_embeds: Optional[torch.FloatTensor] = None,
+        prompt_embeds_text_only: Optional[torch.FloatTensor] = None,
+        pooled_prompt_embeds_text_only: Optional[torch.FloatTensor] = None,
+        **kwargs,
+    ):
+        r"""
+        Function invoked when calling the pipeline for generation.
+        Only the parameters introduced by PhotoMaker are discussed here. 
+        For explanations of the previous parameters in StableDiffusionXLPipeline, please refer to https://github.com/huggingface/diffusers/blob/v0.25.0/src/diffusers/pipelines/stable_diffusion_xl/pipeline_stable_diffusion_xl.py
+
+        Args:
+            input_id_images (`PipelineImageInput`, *optional*): 
+                Input ID Image to work with PhotoMaker.
+            class_tokens_mask (`torch.LongTensor`, *optional*):
+                Pre-generated class token. When the `prompt_embeds` parameter is provided in advance, it is necessary to prepare the `class_tokens_mask` beforehand for marking out the position of class word.
+            prompt_embeds_text_only (`torch.FloatTensor`, *optional*):
+                Pre-generated text embeddings. Can be used to easily tweak text inputs, *e.g.* prompt weighting. If not
+                provided, text embeddings will be generated from `prompt` input argument.
+            pooled_prompt_embeds_text_only (`torch.FloatTensor`, *optional*):
+                Pre-generated pooled text embeddings. Can be used to easily tweak text inputs, *e.g.* prompt weighting.
+                If not provided, pooled text embeddings will be generated from `prompt` input argument.
+
+        Returns:
+            [`~pipelines.stable_diffusion_xl.StableDiffusionXLPipelineOutput`] or `tuple`:
+            [`~pipelines.stable_diffusion_xl.StableDiffusionXLPipelineOutput`] if `return_dict` is True, otherwise a
+            `tuple`. When returning a tuple, the first element is a list with the generated images.
+        """
+
+
+        # 0. Default height and width to unet
+        self._guidance_scale = guidance_scale
+        self._guidance_rescale = guidance_rescale
+        self._clip_skip = clip_skip
+        self._cross_attention_kwargs = cross_attention_kwargs
+        self._denoising_end = denoising_end
+        self._interrupt = False
+
+        print("DO CFG", self.do_classifier_free_guidance)
+        print("XLA_AVAILABLE", XLA_AVAILABLE)
+
+        #        
+        if prompt_embeds is not None and class_tokens_mask is None:
+            raise ValueError(
+                "If `prompt_embeds` are provided, `class_tokens_mask` also have to be passed. Make sure to generate `class_tokens_mask` from the same tokenizer that was used to generate `prompt_embeds`."
+            )
+        # check the input id images
+        if input_id_images is None:
+            raise ValueError(
+                "Provide `input_id_images`. Cannot leave `input_id_images` undefined for PhotoMaker pipeline."
+            )
+
+        assert isinstance(input_id_images, list)
+        assert len(input_id_images) == 1
+        # print("input_id_images", type(input_id_images[0]))
+        # assert isinstance(input_id_images[0], list)
+        # assert len(input_id_images[0]) == 1
+
+
+        # 2. Define call parameters
+        assert isinstance(prompt, str), prompt
+        batch_size = 1
+        device = self._execution_device
+
+
+        # 3. Encode input prompt
+        lora_scale = None
+
+
+        prompt_embeds_list, pooled_prompt_embeds_list, class_tokens_mask_list = [], [], []
+        for prompt_, refs in zip([prompt], [input_id_images]):
+            prompt_embeds, pooled_prompt_embeds, class_tokens_mask = self.encode_prompt_with_trigger_word(
+                prompt=prompt_,
+                device='cuda',
+                num_id_images=len(refs),
+            )
+            prompt_embeds_list.append(prompt_embeds)
+            pooled_prompt_embeds_list.append(pooled_prompt_embeds)
+            class_tokens_mask_list.append(class_tokens_mask)
+
+        prompt_embeds = torch.concat(prompt_embeds_list, dim=0)
+        pooled_prompt_embeds = torch.concat(pooled_prompt_embeds_list, dim=0)
+        class_tokens_mask = torch.concat(class_tokens_mask_list, dim=0)
+
+        all_ref_images_in_batch = list(itertools.chain.from_iterable([input_id_images]))
+        id_pixel_values = self.id_image_processor(all_ref_images_in_batch, return_tensors="pt").pixel_values.unsqueeze(0)
+        id_pixel_values = id_pixel_values.to(device='cuda', dtype=self.id_encoder.dtype)
+        #*********************************************************
+        prompt_embeds = prompt_embeds.to(dtype=self.id_encoder.dtype)
+        prompt_embeds = self.id_encoder(id_pixel_values, prompt_embeds, class_tokens_mask)
+
+        # print("EMBEDS")
+        # print(prompt)
+        # for item, mask_item in zip(prompt_embeds, class_tokens_mask):
+        #     print(item[mask_item])
+        #     print()
+
+        bs_embed, seq_len, _ = prompt_embeds.shape
+
+        prompt_embeds = prompt_embeds.view(bs_embed, seq_len, -1).to(dtype=self.unet.dtype)
+        add_text_embeds = pooled_prompt_embeds
+        add_text_embeds = add_text_embeds.to('cuda', dtype=self.unet.dtype)
+        # added_cond_kwargs = {"text_embeds": add_text_embeds, "time_ids": add_time_ids}
+
+
+
+        # X neg prompt
+
+        (
+            prompt_embeds_text_only,
+            negative_prompt_embeds,
+            pooled_prompt_embeds_text_only, # TODO: replace the pooled_prompt_embeds with text only prompt
+            negative_pooled_prompt_embeds,
+        ) = self.encode_prompt(
+            prompt="",
+            prompt_2="",
+            device=device,
+            num_images_per_prompt=1,
+            do_classifier_free_guidance=self.do_classifier_free_guidance,
+            negative_prompt="",
+            negative_prompt_2="",
+            prompt_embeds=None,
+            negative_prompt_embeds=None,
+            pooled_prompt_embeds=None,
+            negative_pooled_prompt_embeds=None,
+            lora_scale=lora_scale,
+            clip_skip=self.clip_skip,
+        )
+
+
+        # 5. Prepare timesteps
+        timesteps, num_inference_steps = retrieve_timesteps(
+            self.scheduler, num_inference_steps, device, timesteps, sigmas
+        )
+
+
+        # 8. Prepare latent variables
+        num_channels_latents = self.unet.config.in_channels
+        latents = self.prepare_latents(
+            batch_size * num_images_per_prompt,
+            num_channels_latents,
+            512, # height
+            512, # width
+            prompt_embeds.dtype,
+            device,
+            generator,
+            latents,
+        )
+
+        # 9. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
+        extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
+
+        # 10. Prepare added time ids & embeddings
+        add_text_embeds = pooled_prompt_embeds
+        assert self.text_encoder_2 is not None
+        text_encoder_projection_dim = self.text_encoder_2.config.projection_dim
+
+        def compute_time_ids2(original_size, crops_coords_top_left):
+            # Adapted from pipeline.StableDiffusionXLPipeline._get_add_time_ids
+            target_size = (512, 512)
+            add_time_ids = list(original_size + crops_coords_top_left + target_size)
+            add_time_ids = torch.tensor([add_time_ids])
+            add_time_ids = add_time_ids.to("cuda", dtype=torch.float32)
+            return add_time_ids
+
+ 
+        add_time_ids = torch.cat(
+            [compute_time_ids2(s, c) for s, c in zip([(512, 512)], [(0, 0)])]
+        )
+
+        assert negative_original_size is None or negative_target_size is None
+        negative_add_time_ids = add_time_ids
+            
+        if self.do_classifier_free_guidance:
+            add_time_ids = torch.cat([negative_add_time_ids, add_time_ids], dim=0)
+
+        prompt_embeds = prompt_embeds.to(device)
+        add_text_embeds = add_text_embeds.to(device)
+        add_time_ids = add_time_ids.to(device)# .repeat(batch_size * num_images_per_prompt, 1)
+
+
+        # 11. Denoising loop
+        num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
+
+        # 11.1 Apply denoising_end
+        if (
+            self.denoising_end is not None
+            and isinstance(self.denoising_end, float)
+            and self.denoising_end > 0
+            and self.denoising_end < 1
+        ):
+            print("DENOISING END")
+            discrete_timestep_cutoff = int(
+                round(
+                    self.scheduler.config.num_train_timesteps
+                    - (self.denoising_end * self.scheduler.config.num_train_timesteps)
+                )
+            )
+            num_inference_steps = len(list(filter(lambda ts: ts >= discrete_timestep_cutoff, timesteps)))
+            timesteps = timesteps[:num_inference_steps]
+
+
+        # 12. Optionally get Guidance Scale Embedding
+        timestep_cond = None
+        if self.unet.config.time_cond_proj_dim is not None:
+            print("NUMBER 12")
+            guidance_scale_tensor = torch.tensor(self.guidance_scale - 1).repeat(batch_size * num_images_per_prompt)
+            timestep_cond = self.get_guidance_scale_embedding(
+                guidance_scale_tensor, embedding_dim=self.unet.config.time_cond_proj_dim
+            ).to(device=device, dtype=latents.dtype)
+
+
+        self._num_timesteps = len(timesteps)
+        with self.progress_bar(total=num_inference_steps) as progress_bar:
+            for i, t in enumerate(timesteps):
+                if self.interrupt:
+                    continue
+
+                # expand the latents if we are doing classifier free guidance
+                latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
+
+                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+
+                if self.do_classifier_free_guidance:
+                    current_prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
+                    add_text_embeds = torch.cat([negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
+                else:
+                    current_prompt_embeds =  prompt_embeds
+                    add_text_embeds = pooled_prompt_embeds
+
+                    
+                added_cond_kwargs = {"text_embeds": add_text_embeds, "time_ids": add_time_ids}
+
+                # predict the noise residual
+                noise_pred = self.unet(
+                    latent_model_input,
+                    t,
+                    encoder_hidden_states=current_prompt_embeds,
+                    timestep_cond=timestep_cond,
+                    cross_attention_kwargs=self.cross_attention_kwargs,
+                    added_cond_kwargs=added_cond_kwargs,
+                    return_dict=False,
+                )[0]
+
+                # perform guidance
+                if self.do_classifier_free_guidance:
+                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+                if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
+                    # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
+                    noise_pred = rescale_noise_cfg(noise_pred, noise_pred_text, guidance_rescale=self.guidance_rescale)
+
+                # compute the previous noisy sample x_t -> x_t-1
+                latents_dtype = latents.dtype
+                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
+          
+
+                # call the callback, if provided
+                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                    progress_bar.update()
+
 
         if not output_type == "latent":
             # make sure the VAE is in float32 mode, as it overflows in float16

@@ -83,6 +83,17 @@ def get_dataloaders(config, device):
             shuffle=(dataset_partition == "train"),
             worker_init_fn=set_worker_seed,
         )
+        # import torch
+
+        # partition_dataloader = torch.utils.data.DataLoader(
+        #     dataset=dataset,
+        #     batch_size=12,
+        #     drop_last=False,
+        #     shuffle=(dataset_partition == "train"),
+        #     num_workers=12,
+        #     pin_memory=True
+        # )
+
         dataloaders[dataset_partition] = partition_dataloader
 
     return dataloaders, batch_transforms
