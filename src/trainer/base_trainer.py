@@ -30,7 +30,7 @@ class BaseTrainer:
     def __init__(
         self,
         model,
-        # pipe,
+        accelerator,
         criterion,
         metrics,
         optimizer,
@@ -80,11 +80,19 @@ class BaseTrainer:
         self.log_step = config.trainer.get("log_step", 50)
 
         self.model = model
-        # self.pipe = pipe
+        self.accelerator = accelerator
         self.criterion = criterion
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
         self.batch_transforms = batch_transforms
+
+        # define pipeline for validation
+        self.pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
+            'stabilityai/stable-diffusion-xl-base-1.0', #'SG161222/RealVisXL_V3.0',  
+            torch_dtype=torch.float16, 
+            use_safetensors=True, 
+            variant="fp16"
+        )
 
         # define dataloaders
         self.train_dataloader = dataloaders["train"]
@@ -142,9 +150,7 @@ class BaseTrainer:
             writer=self.writer,
         )
 
-
         # define checkpoint dir and init everything if required
-
         self.checkpoint_dir = (
             ROOT_PATH / config.trainer.save_dir / config.writer.run_name
         )
@@ -156,12 +162,6 @@ class BaseTrainer:
         if config.trainer.get("from_pretrained") is not None:
             self._from_pretrained(config.trainer.get("from_pretrained"))
 
-        self.pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
-            'stabilityai/stable-diffusion-xl-base-1.0', #'SG161222/RealVisXL_V3.0',  
-            torch_dtype=torch.float16, 
-            use_safetensors=True, 
-            variant="fp16"
-        )
 
     def train(self):
         """
@@ -170,8 +170,10 @@ class BaseTrainer:
         try:
             self._train_process()
         except KeyboardInterrupt as e:
-            self.logger.info("Saving model on keyboard interrupt")
-            self._save_checkpoint(self._last_epoch, save_best=False)
+            if self.accelerator.is_local_main_process: 
+                self.logger.info("Saving model on keyboard interrupt")
+                self._save_checkpoint(self._last_epoch, save_best=False)
+                self.accelerator.end_training()
             raise e
 
     def _train_process(self):
@@ -187,22 +189,23 @@ class BaseTrainer:
             self._last_epoch = epoch
             result = self._train_epoch(epoch)
 
-            # save logged information into logs dict
-            logs = {"epoch": epoch}
-            logs.update(result)
+            if self.accelerator.is_local_main_process:
+                # save logged information into logs dict
+                logs = {"epoch": epoch}
+                logs.update(result)
 
-            # print logged information to the screen
-            for key, value in logs.items():
-                self.logger.info(f"    {key:15s}: {value}")
+                # print logged information to the screen
+                for key, value in logs.items():
+                    self.logger.info(f"    {key:15s}: {value}")
 
-            # evaluate model performance according to configured metric,
-            # save best checkpoint as model_best
-            best, stop_process, not_improved_count = self._monitor_performance(
-                logs, not_improved_count
-            )
+                # evaluate model performance according to configured metric,
+                # save best checkpoint as model_best
+                best, stop_process, not_improved_count = self._monitor_performance(
+                    logs, not_improved_count
+                )
 
-            if epoch % self.save_period == 0 or best:
-                self._save_checkpoint(epoch, save_best=best, only_best=True)
+                if epoch % self.save_period == 0 or best:
+                    self._save_checkpoint(epoch, save_best=best, only_best=True)
 
             if stop_process:  # early_stop
                 break
@@ -222,20 +225,21 @@ class BaseTrainer:
         logs = {}
         self.is_train = True
         self.train_metrics.reset()
-        self.writer.set_step((epoch - 1) * self.epoch_len)
-        self.writer.add_scalar("general/epoch", epoch)
 
-        if epoch == 1:
-            for part, dataloader in self.evaluation_dataloaders.items():
-                val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
-                logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
-            self.is_train = True
+        if self.accelerator.is_local_main_process:
+            self.writer.set_step((epoch - 1) * self.epoch_len)
+            self.writer.add_scalar("general/epoch", epoch)
+
+        # if epoch == 1 and self.accelerator.is_local_main_process:
+        #     for part, dataloader in self.evaluation_dataloaders.items():
+        #         val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
+        #         logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
+        #     self.is_train = True
 
 
         for batch_idx, batch in enumerate(
             tqdm(self.train_dataloader, desc="train", total=self.epoch_len)
         ):  
-            
             try:
                 batch = self.process_batch(
                     batch,
@@ -243,45 +247,52 @@ class BaseTrainer:
                 )
             except torch.cuda.OutOfMemoryError as e:
                 if self.skip_oom:
-                    self.logger.warning("OOM on batch. Skipping batch.")
+                    if self.accelerator.is_local_main_process:
+                        self.logger.warning("OOM on batch. Skipping batch.")
                     torch.cuda.empty_cache()  # free some memory
                     continue
                 else:
                     raise e
 
-            self.train_metrics.update("train/grad_norm", self._get_grad_norm())
+            if self.accelerator.is_local_main_process:
+                grad_norm_reduced = self.accelerator.reduce(self._get_grad_norm(), reduction="mean")
+                self.train_metrics.update("train/grad_norm", grad_norm_reduced)
 
             # log current results
             if batch_idx % self.log_step == 0:
-                self.writer.set_step((epoch - 1) * self.epoch_len + batch_idx)
-                self.logger.debug(
-                    "Train Epoch: {} {} Loss: {:.6f}".format(
-                        epoch, self._progress(batch_idx), batch["loss"].item()
+                if self.accelerator.is_local_main_process:
+                    self.writer.set_step((epoch - 1) * self.epoch_len + batch_idx)
+                    self.logger.debug(
+                        "Train Epoch: {} {} Reduced Loss: {:.6f}".format(
+                            epoch, self._progress(batch_idx), batch["loss"].item()
+                        )
                     )
-                )
-                self.writer.add_scalar(
-                    "general/lr for lora layers", self.lr_scheduler.get_last_lr()[0]
-                )
-                self.writer.add_scalar(
-                    "general/lr for other modules", self.lr_scheduler.get_last_lr()[1]
-                )
-                self._log_scalars(self.train_metrics, part="train/")
-                self._log_batch(batch_idx, batch)
+                    self.writer.add_scalar(
+                        "general/lr for lora layers", self.lr_scheduler.get_last_lr()[0]
+                    )
+                    self.writer.add_scalar(
+                        "general/lr for other modules", self.lr_scheduler.get_last_lr()[1]
+                    )
+                    if self.accelerator.is_local_main_process:
+                        self._log_scalars(self.train_metrics, part="train/")
+                        self._log_batch(batch_idx, batch)
                 # we don't want to reset train metrics at the start of every epoch
                 # because we are interested in recent train metrics
                 last_train_metrics = self.train_metrics.result()
                 self.train_metrics.reset()
+
             if batch_idx + 1 >= self.epoch_len:
                 break
-
-        logs.update(last_train_metrics)
+        if self.accelerator.is_local_main_process:
+            logs.update(last_train_metrics)
 
         # Run val/test
-        for part, dataloader in self.evaluation_dataloaders.items():
-            self.pipe.unfuse_lora()
-            self.pipe.delete_adapters("photomaker")
-            val_logs = self._evaluation_epoch(epoch, part, dataloader)
-            logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
+        if self.accelerator.is_local_main_process:
+            for part, dataloader in self.evaluation_dataloaders.items():
+                self.pipe.unfuse_lora()
+                self.pipe.delete_adapters("photomaker")
+                val_logs = self._evaluation_epoch(epoch, part, dataloader)
+                logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
 
         return logs
 
@@ -326,6 +337,7 @@ class BaseTrainer:
                     batch_idx, batch, part
                 )  # log only the last batch during inference
             self._log_scalars(self.evaluation_metrics, part="")
+
         self.pipe.to('cpu')
         # pipe = None
         # torch.cuda.empty_cache()
@@ -430,7 +442,7 @@ class BaseTrainer:
         """
         if self.config["trainer"].get("max_grad_norm", None) is not None:
             params_to_optimize = filter(lambda p: p.requires_grad, self.model.unet.parameters())
-            clip_grad_norm_(
+            self.accelerator.clip_grad_norm_(
                 params_to_optimize, self.config["trainer"]["max_grad_norm"]
             )
 
@@ -452,7 +464,7 @@ class BaseTrainer:
             torch.stack([torch.norm(p.grad.detach(), norm_type) for p in parameters]),
             norm_type,
         )
-        return total_norm.item()
+        return total_norm #.item()
 
     def _progress(self, batch_idx):
         """
@@ -513,11 +525,12 @@ class BaseTrainer:
                 'model_best.pth'(do not duplicate the checkpoint as
                 checkpoint-epochEpochNumber.pth)
         """
-        arch = type(self.model).__name__
+        unwrapped_model = self.accelerator.unwrap_model(self.model)
+        arch = type(unwrapped_model).__name__
         state = {
             "arch": arch,
             "epoch": epoch,
-            "state_dict": self.model.state_dict(),
+            "state_dict": unwrapped_model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             # "lr_scheduler": self.lr_scheduler.state_dict(),
             "monitor_best": self.mnt_best,

@@ -7,7 +7,7 @@ import json
 from src.id_utils.aligner import Aligner
 from PIL import Image
 import numpy as np
-
+import random
 
 class MeladzeDataset(BaseDataset):
     def __init__(self, images_dir_path=None, captions_path=None, index_path=None, *args, **kwargs):

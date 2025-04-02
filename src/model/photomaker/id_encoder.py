@@ -79,7 +79,8 @@ class FuseModule(nn.Module):
 class PhotoMakerIDEncoder(CLIPVisionModelWithProjection):
     def __init__(self):
         super().__init__(CLIPVisionConfig(**VISION_CONFIG_DICT))
-        self.load_state_dict(torch.load("clip_encoder.pth", weights_only=True), strict=True)
+        pretrained_model_state_dict = CLIPVisionModelWithProjection.from_pretrained("openai/clip-vit-large-patch14").state_dict()
+        self.load_state_dict(pretrained_model_state_dict, strict=True)
         self.visual_projection_2 = nn.Linear(1024, 1280, bias=False)
         self.fuse_module = FuseModule(2048)
 

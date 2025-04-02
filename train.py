@@ -4,6 +4,7 @@ import hydra
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
+from accelerate import Accelerator
 
 from src.datasets.data_utils import get_dataloaders
 from src.trainer import Trainer
@@ -26,14 +27,18 @@ def main(config):
     set_random_seed(config.trainer.seed)
     print(config.model.rank)
 
+    accelerator = Accelerator()
+
     project_config = OmegaConf.to_container(config)
     logger = setup_saving_and_logging(config)
     writer = instantiate(config.writer, logger, project_config)
 
-    if config.trainer.device == "auto":
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    else:
-        device = config.trainer.device
+    # if config.trainer.device == "auto":
+    #     device = "cuda" if torch.cuda.is_available() else "cpu"
+    # else:
+    #     device = config.trainer.device
+
+    device = accelerator.device
 
     # setup data_loader instances
     # batch_transforms should be put on device
@@ -63,9 +68,15 @@ def main(config):
     # epoch_len = None or len(dataloader) for epoch-based training
     epoch_len = config.trainer.get("epoch_len")
 
+    train_dataloader = dataloaders["train"]
+    val_dataloader = dataloaders["val"]
+    model, optimizer, train_dataloader, val_dataloader, lr_scheduler = accelerator.prepare(
+        model, optimizer, train_dataloader, val_dataloader, lr_scheduler
+    )
+
     trainer = Trainer(
         model=model,
-        # pipe=pipe,
+        accelerator=accelerator,
         criterion=loss_function,
         metrics=metrics,
         optimizer=optimizer,
@@ -81,6 +92,7 @@ def main(config):
     )
 
     trainer.train()
+    accelerator.end_training()
 
 
 if __name__ == "__main__":

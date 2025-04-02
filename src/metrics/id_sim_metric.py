@@ -19,18 +19,19 @@ class IDSim(BaseMetric):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.aligner = Aligner()
         self.metric = IDMetric()
-        self.id_embeds = torch.load(ID_EMBEDS_PTH)
+        # self.id_embeds = torch.load(ID_EMBEDS_PTH)
 
     def __call__(self, **batch):
-        generated_img_cropped, _, embeds = self.aligner(batch['generated'])
-        if len(generated_img_cropped) == 0:
-            print("FACES NOT FOUND")
-            return 0
+        # uncommnet when using id dataset
+        # generated_img_cropped, _, embeds = self.aligner(batch['generated'])
+        # if len(generated_img_cropped) == 0:
+        #     print("FACES NOT FOUND")
+        #     return 0
 
-        assert type(batch["id"]) is str
+        # assert type(batch["id"]) is str
 
-        result = 0
-        for embed in embeds:
-            result += cos_sim(embed, self.id_embeds[batch["id"]])
-        result = result / len(embeds)
-        return result
+        # result = 0
+        # for embed in embeds:
+        #     result += cos_sim(embed, self.id_embeds[batch["id"]])
+        # result = result / len(embeds)
+        return 0

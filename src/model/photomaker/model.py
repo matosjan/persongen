@@ -172,7 +172,8 @@ class PhotoMaker():
     # time ids
     def compute_time_ids(self, original_size, crops_coords_top_left):
         # Adapted from pipeline.StableDiffusionXLPipeline._get_add_time_ids
-        target_size = [512, 512]
+        # print(original_size, crops_coords_top_left)
+        target_size = (512, 512)
         add_time_ids = list(original_size + crops_coords_top_left + target_size)
         add_time_ids = torch.tensor([add_time_ids])
         add_time_ids = add_time_ids.to("cuda", dtype=torch.float32)

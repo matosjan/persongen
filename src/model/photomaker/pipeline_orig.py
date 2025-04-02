@@ -879,7 +879,6 @@ class PhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
         if not output_type == "latent":
             # make sure the VAE is in float32 mode, as it overflows in float16
             needs_upcasting = self.vae.dtype == torch.float16 and self.vae.config.force_upcast
-
             if needs_upcasting:
                 self.upcast_vae()
                 latents = latents.to(next(iter(self.vae.post_quant_conv.parameters())).dtype)
@@ -904,7 +903,6 @@ class PhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
                 latents = latents / self.vae.config.scaling_factor
 
             image = self.vae.decode(latents, return_dict=False)[0]
-
             # cast back to fp16 if needed
             if needs_upcasting:
                 self.vae.to(dtype=torch.float16)
@@ -915,6 +913,7 @@ class PhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
         # apply watermark if available
         # if self.watermark is not None:
         #     image = self.watermark.apply_watermark(image)
+
 
         image = self.image_processor.postprocess(image, output_type=output_type)
 

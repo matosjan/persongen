@@ -2,7 +2,7 @@ defaults:
   - model: photomaker
   - writer: wandb
   - metrics: example
-  - datasets: id_dataset
+  - datasets: meladze_dataset
   - dataloader: example
   - transforms: example_only_instance
   - _self_
@@ -18,9 +18,9 @@ lr_scheduler:
 loss_function:
   _target_: src.loss.DiffusionLoss
 trainer:
-  log_step: 50
+  log_step: 10
   n_epochs: 72
-  epoch_len: 50
+  epoch_len: 29
   # device_tensors: ["pixel_values"] # which tensors should be on device (ex. GPU)
   resume_from: null # null or path to the checkpoint dir with *.pth and config.yaml
   device: auto # device name or "auto"
@@ -32,7 +32,7 @@ trainer:
   seed: 42
 validation_args:
   negative_prompt: "nsfw, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
-  num_images_per_prompt: 5
+  num_images_per_prompt: 1
   num_inference_steps: 50
   start_merge_step: 10
   guidance_scale: 5

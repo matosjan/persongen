@@ -116,14 +116,9 @@ runs/
 __MACOSX/
 
 # other stuff
-my_example.py
-denis_example.py
-run_align.py
-calculate_id.py
-calculate_clip.py
-infer_photomaker.py
 *.ipynb
 *.png
+*.sbatch
 
 # pretrained models, etc.
 *.pth

@@ -38,7 +38,8 @@ class Trainer(BaseTrainer):
         if self.is_train:
             metric_funcs = self.metrics["train"]
             self.optimizer.zero_grad()
-            
+         
+        print(int(self.accelerator.is_local_main_process), batch['caption'])
         #######################
         do_cfg =  (torch.rand(1) < 0.1).item()
         masked_loss = (torch.rand(1) < 0.5).item()
@@ -51,7 +52,7 @@ class Trainer(BaseTrainer):
         assert torch.isfinite(batch["loss"])
 
         if self.is_train:
-            batch["loss"].backward()  # sum of all losses is always called loss
+            self.accelerator.backward(batch['loss']) # sum of all losses is always called loss
             self._clip_grad_norm()
             self.optimizer.step()
             if self.lr_scheduler is not None:
@@ -59,10 +60,12 @@ class Trainer(BaseTrainer):
 
         # update metrics for each loss (in case of multiple losses)
         for loss_name in self.config.writer.loss_names:
+            batch[loss_name] = self.accelerator.reduce(batch[loss_name], reduction="mean")
             metrics.update("train/" + loss_name, batch[loss_name].item())
 
         for met in metric_funcs:
-            metrics.update("train/" + met.name, met(**batch))
+            metric_reduced = self.accelerator.reduce(met(**batch), reduction="mean")
+            metrics.update("train/" + met.name, metric_reduced)
 
         return batch
     
@@ -81,8 +84,6 @@ class Trainer(BaseTrainer):
             metrics.update("val/" + met.name, met(**batch))
         return batch
         
-
-
     def _log_batch(self, batch_idx, batch, mode="train"):
         """
         Log data from batch. Calls self.writer.add_* to log data
@@ -106,7 +107,7 @@ class Trainer(BaseTrainer):
             # Log Stuff
             prompt = batch['prompt']
             ref_num = len(batch['ref_images'])
-            assert len(batch['ref_images']) == 1, len(batch['ref_images'])
+            # assert len(batch['ref_images']) == 1, len(batch['ref_images'])
 
             ref_img = batch['ref_images'][0]
             generated_img = batch['generated'][0]

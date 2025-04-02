@@ -18,7 +18,6 @@ class MeladzeValDataset():
         self.ref_sets = []
         for ref_num in range(1, 4):
             self.ref_sets.extend(list(itertools.combinations(self.img_paths, ref_num)))
-        # print(self.ref_sets)
     
     def __len__(self):
         return len(self.prompts) * len(self.ref_sets)
@@ -28,9 +27,10 @@ class MeladzeValDataset():
         ref_set_ind = ind % len(self.ref_sets)
         prompt = self.prompts[prompt_ind]
         ref_set = self.ref_sets[ref_set_ind]
-        # print(ref_set, len(self.ref_sets))
         ref_images = [Image.open(path).convert('RGB') for path in ref_set]
         return {
             'prompt': prompt,
             'ref_images': ref_images,
+            'id': [path.split('/')[-1].split('.')[0] for path in ref_set],
+            'image_name': [path.split('/')[-1] for path in ref_set]
         }
