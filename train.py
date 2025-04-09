@@ -10,6 +10,15 @@ from src.datasets.data_utils import get_dataloaders
 from src.trainer import Trainer
 from src.utils.init_utils import set_random_seed, setup_saving_and_logging
 import itertools
+import os
+import sys
+import subprocess
+
+# def get_nvidia_smi_output():
+#     result = subprocess.run(["nvidia-smi"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+#     return result.stdout
+def gpu_utilization():
+    return subprocess.run(["nvidia-smi"], capture_output=True).stdout.decode('utf-8')
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -25,33 +34,48 @@ def main(config):
         config (DictConfig): hydra experiment config.
     """
     set_random_seed(config.trainer.seed)
-    print(config.model.rank)
 
     accelerator = Accelerator()
+    device = accelerator.device
+        
+    print(config.model.rank)
+    print("Device for this process:", accelerator.device)
+    print("Distributed type:", accelerator.distributed_type)
+    print("Total processes:", accelerator.num_processes)
+    print("Local process index:", accelerator.local_process_index)
 
-    project_config = OmegaConf.to_container(config)
-    logger = setup_saving_and_logging(config)
-    writer = instantiate(config.writer, logger, project_config)
+    if accelerator.is_main_process:
+        project_config = OmegaConf.to_container(config)
+        logger = setup_saving_and_logging(config)
+        writer = instantiate(config.writer, logger, project_config)
+        print("CUDA_VISIBLE_DEVICES:", os.environ.get("CUDA_VISIBLE_DEVICES"))
+    else:
+        writer = None
+        logger = None
 
     # if config.trainer.device == "auto":
     #     device = "cuda" if torch.cuda.is_available() else "cpu"
     # else:
     #     device = config.trainer.device
 
-    device = accelerator.device
-
     # setup data_loader instances
     # batch_transforms should be put on device
     dataloaders, batch_transforms = get_dataloaders(config, device)
 
     # build model architecture, then print to console
-    model = instantiate(config.model)
-    logger.info(model)
+    model = instantiate(config.model, device=device)
+    # logger.info(model)
 
     # get function handles of loss and metrics
     loss_function = instantiate(config.loss_function).to(device)
-    metrics = instantiate(config.metrics)
-
+    metrics = {"train": [], "inference": []}
+    for metric_type in ["train", "inference"]:
+        for metric_config in config.metrics.get(metric_type, []):
+            metrics[metric_type].append(
+                instantiate(metric_config, device=device)
+            )
+            
+    
     # build optimizer, learning rate scheduler
     lora_params = filter(lambda p: p.requires_grad, model.unet.parameters())
     other_params =  filter(lambda p: p.requires_grad, model.id_encoder.parameters())
@@ -69,10 +93,12 @@ def main(config):
     epoch_len = config.trainer.get("epoch_len")
 
     train_dataloader = dataloaders["train"]
-    val_dataloader = dataloaders["val"]
-    model, optimizer, train_dataloader, val_dataloader, lr_scheduler = accelerator.prepare(
-        model, optimizer, train_dataloader, val_dataloader, lr_scheduler
+
+    model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        model, optimizer, train_dataloader, lr_scheduler
     )
+
+    dataloaders["train"] = train_dataloader
 
     trainer = Trainer(
         model=model,

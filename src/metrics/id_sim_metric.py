@@ -4,7 +4,7 @@ from src.metrics.base_metric import BaseMetric
 from src.id_utils.id_metric import IDMetric
 from src.id_utils.aligner import Aligner
 
-ID_EMBEDS_PTH = "id_embeds.pth"
+ID_EMBEDS_PTH = "/home/dnbobkov/matos/persongen/src/metrics/id_embeds.pth"
 
 
 def cos_sim(arr1, arr2):
@@ -14,24 +14,25 @@ def cos_sim(arr1, arr2):
 
 
 class IDSim(BaseMetric):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, device, *args, **kwargs):
+        print(device, kwargs)
         super().__init__(*args, **kwargs)
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
         self.aligner = Aligner()
-        self.metric = IDMetric()
-        # self.id_embeds = torch.load(ID_EMBEDS_PTH)
+        self.metric = IDMetric(device=self.device)
+        self.id_embeds = torch.load(ID_EMBEDS_PTH)
 
     def __call__(self, **batch):
         # uncommnet when using id dataset
-        # generated_img_cropped, _, embeds = self.aligner(batch['generated'])
-        # if len(generated_img_cropped) == 0:
-        #     print("FACES NOT FOUND")
-        #     return 0
+        generated_img_cropped, _, embeds = self.aligner(batch['generated'])
+        if len(generated_img_cropped) == 0:
+            print("FACES NOT FOUND")
+            return 0
 
-        # assert type(batch["id"]) is str
+        assert type(batch["id"]) is str
 
-        # result = 0
-        # for embed in embeds:
-        #     result += cos_sim(embed, self.id_embeds[batch["id"]])
-        # result = result / len(embeds)
-        return 0
+        result = 0
+        for embed in embeds:
+            result += cos_sim(embed, self.id_embeds[batch["id"]])
+        result = result / len(embeds)
+        return result

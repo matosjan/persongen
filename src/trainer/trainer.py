@@ -7,6 +7,7 @@ from src.metrics.tracker import MetricTracker
 from src.trainer.base_trainer import BaseTrainer
 import itertools
 from src.logger.utils import BaseTimer
+import os
 
 
 class Trainer(BaseTrainer):
@@ -38,40 +39,48 @@ class Trainer(BaseTrainer):
         if self.is_train:
             metric_funcs = self.metrics["train"]
             self.optimizer.zero_grad()
+        
+        # self.accelerator.wait_for_everyone()
          
-        print(int(self.accelerator.is_local_main_process), batch['caption'])
         #######################
-        do_cfg =  (torch.rand(1) < 0.1).item()
+        do_cfg = (torch.rand(1) < 0.1).item()
         masked_loss = (torch.rand(1) < 0.5).item()
-        output = self.model.forward(**batch, do_cfg=do_cfg, masked_loss=masked_loss)
+        print(os.getpid(), do_cfg, masked_loss)
+        output = self.model(**batch, do_cfg=do_cfg, masked_loss=masked_loss)
         batch.update(output)
 
         #######################
         all_losses = self.criterion(**batch)
         batch.update(all_losses)
+        print(os.getpid(), all_losses)
         assert torch.isfinite(batch["loss"])
 
         if self.is_train:
+            print(f'before backward {os.getpid()}')
             self.accelerator.backward(batch['loss']) # sum of all losses is always called loss
+            print(f'after backward {os.getpid()}')
             self._clip_grad_norm()
             self.optimizer.step()
+            print(f'after optstep {os.getpid()}')
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
 
         # update metrics for each loss (in case of multiple losses)
         for loss_name in self.config.writer.loss_names:
-            batch[loss_name] = self.accelerator.reduce(batch[loss_name], reduction="mean")
+            # batch[loss_name] = self.accelerator.reduce(batch[loss_name], reduction="mean")
             metrics.update("train/" + loss_name, batch[loss_name].item())
 
         for met in metric_funcs:
             metric_reduced = self.accelerator.reduce(met(**batch), reduction="mean")
             metrics.update("train/" + met.name, metric_reduced)
+        
+        print(f'after reduce {os.getpid()}')
 
         return batch
     
-    def process_evaluation_batch(self, batch, pipe=None, metrics = None):
-        generator = torch.Generator(device='cuda').manual_seed(42)
-        generated_images = self.pipe(
+    def process_evaluation_batch(self, batch, pipe=None, metrics=None):
+        generator = torch.Generator(device=self.device).manual_seed(42)
+        generated_images = pipe(
             prompt=batch['prompt'],
             input_id_images=list(batch['ref_images']),
             generator=generator,

@@ -20,6 +20,15 @@ from src.model.photomaker.pipeline_orig import PhotoMakerStableDiffusionXLPipeli
 from diffusers import EulerDiscreteScheduler
 from src.logger.utils import BaseTimer
 from itertools import chain
+import gc
+
+import os
+import sys
+import subprocess
+
+def get_nvidia_smi_output():
+    result = subprocess.run(["nvidia-smi"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return result.stdout
 
 
 class BaseTrainer:
@@ -87,12 +96,12 @@ class BaseTrainer:
         self.batch_transforms = batch_transforms
 
         # define pipeline for validation
-        self.pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
-            'stabilityai/stable-diffusion-xl-base-1.0', #'SG161222/RealVisXL_V3.0',  
-            torch_dtype=torch.float16, 
-            use_safetensors=True, 
-            variant="fp16"
-        )
+        # self.pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
+        #     'stabilityai/stable-diffusion-xl-base-1.0', #'SG161222/RealVisXL_V3.0',  
+        #     torch_dtype=torch.float16, 
+        #     use_safetensors=True, 
+        #     variant="fp16"
+        # )
 
         # define dataloaders
         self.train_dataloader = dataloaders["train"]
@@ -170,7 +179,7 @@ class BaseTrainer:
         try:
             self._train_process()
         except KeyboardInterrupt as e:
-            if self.accelerator.is_local_main_process: 
+            if self.accelerator.is_main_process: 
                 self.logger.info("Saving model on keyboard interrupt")
                 self._save_checkpoint(self._last_epoch, save_best=False)
                 self.accelerator.end_training()
@@ -189,7 +198,7 @@ class BaseTrainer:
             self._last_epoch = epoch
             result = self._train_epoch(epoch)
 
-            if self.accelerator.is_local_main_process:
+            if self.accelerator.is_main_process:
                 # save logged information into logs dict
                 logs = {"epoch": epoch}
                 logs.update(result)
@@ -207,8 +216,8 @@ class BaseTrainer:
                 if epoch % self.save_period == 0 or best:
                     self._save_checkpoint(epoch, save_best=best, only_best=True)
 
-            if stop_process:  # early_stop
-                break
+                if stop_process:  # early_stop
+                    break
 
     def _train_epoch(self, epoch):
         """
@@ -225,20 +234,41 @@ class BaseTrainer:
         logs = {}
         self.is_train = True
         self.train_metrics.reset()
+        pid = os.getpid()
 
-        if self.accelerator.is_local_main_process:
+    
+        if self.accelerator.is_main_process:
+            print(epoch, os.getpid(), get_nvidia_smi_output())
             self.writer.set_step((epoch - 1) * self.epoch_len)
             self.writer.add_scalar("general/epoch", epoch)
 
-        # if epoch == 1 and self.accelerator.is_local_main_process:
-        #     for part, dataloader in self.evaluation_dataloaders.items():
-        #         val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
-        #         logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
-        #     self.is_train = True
+        if epoch == 1 and self.accelerator.is_main_process:
 
+            for part, dataloader in self.evaluation_dataloaders.items():
+                allocated = torch.cuda.memory_allocated(self.device)
+                reserved = torch.cuda.memory_reserved(self.device)
+
+                print(f"{epoch} val 0 Memory allocated on {self.device}: {allocated / (1024 ** 2):.2f} MiB")
+                print(f"{epoch} val 0 Memory reserved on {self.device}: {reserved / (1024 ** 2):.2f} MiB")
+                val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
+                allocated = torch.cuda.memory_allocated(self.device)
+                reserved = torch.cuda.memory_reserved(self.device)
+
+                print(f"{epoch} after val 0 Memory allocated on {self.device}: {allocated / (1024 ** 2):.2f} MiB")
+                print(f"{epoch} after val 0 Memory reserved on {self.device}: {reserved / (1024 ** 2):.2f} MiB")
+                logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
+            self.is_train = True
+
+        allocated = torch.cuda.memory_allocated(self.device)
+        reserved = torch.cuda.memory_reserved(self.device)
+
+        print(f"{epoch} before train Memory allocated on {self.device}: {allocated / (1024 ** 2):.2f} MiB")
+        print(f"{epoch} before train Memory reserved on {self.device}: {reserved / (1024 ** 2):.2f} MiB")
+
+        self.accelerator.wait_for_everyone()
 
         for batch_idx, batch in enumerate(
-            tqdm(self.train_dataloader, desc="train", total=self.epoch_len)
+            tqdm(self.train_dataloader, desc=f"train{epoch}_{pid}", total=self.epoch_len)
         ):  
             try:
                 batch = self.process_batch(
@@ -247,20 +277,21 @@ class BaseTrainer:
                 )
             except torch.cuda.OutOfMemoryError as e:
                 if self.skip_oom:
-                    if self.accelerator.is_local_main_process:
-                        self.logger.warning("OOM on batch. Skipping batch.")
+                    # if self.accelerator.is_main_process:
+                    self.logger.warning("OOM on batch. Skipping batch.")
                     torch.cuda.empty_cache()  # free some memory
                     continue
                 else:
                     raise e
 
-            if self.accelerator.is_local_main_process:
-                grad_norm_reduced = self.accelerator.reduce(self._get_grad_norm(), reduction="mean")
-                self.train_metrics.update("train/grad_norm", grad_norm_reduced)
+            # можно не редюсить
+            # grad_norm_reduced = self.accelerator.reduce(self._get_grad_norm(), reduction="mean") 
+            if self.accelerator.is_main_process:
+                self.train_metrics.update("train/grad_norm", self._get_grad_norm())
 
             # log current results
             if batch_idx % self.log_step == 0:
-                if self.accelerator.is_local_main_process:
+                if self.accelerator.is_main_process:
                     self.writer.set_step((epoch - 1) * self.epoch_len + batch_idx)
                     self.logger.debug(
                         "Train Epoch: {} {} Reduced Loss: {:.6f}".format(
@@ -273,9 +304,8 @@ class BaseTrainer:
                     self.writer.add_scalar(
                         "general/lr for other modules", self.lr_scheduler.get_last_lr()[1]
                     )
-                    if self.accelerator.is_local_main_process:
-                        self._log_scalars(self.train_metrics, part="train/")
-                        self._log_batch(batch_idx, batch)
+                    self._log_scalars(self.train_metrics, part="train/")
+                    self._log_batch(batch_idx, batch)
                 # we don't want to reset train metrics at the start of every epoch
                 # because we are interested in recent train metrics
                 last_train_metrics = self.train_metrics.result()
@@ -283,16 +313,33 @@ class BaseTrainer:
 
             if batch_idx + 1 >= self.epoch_len:
                 break
-        if self.accelerator.is_local_main_process:
+            
+        if self.accelerator.is_main_process:
             logs.update(last_train_metrics)
 
         # Run val/test
-        if self.accelerator.is_local_main_process:
+        allocated = torch.cuda.memory_allocated(self.device)
+        reserved = torch.cuda.memory_reserved(self.device)
+
+        print(f"{epoch} after train before val Memory allocated on {self.device}: {allocated / (1024 ** 2):.2f} MiB")
+        print(f"{epoch} after train before val Memory reserved on {self.device}: {reserved / (1024 ** 2):.2f} MiB")
+        # torch.cuda.empty_cache()
+        # gc.collect()?
+        if self.accelerator.is_main_process:
             for part, dataloader in self.evaluation_dataloaders.items():
-                self.pipe.unfuse_lora()
-                self.pipe.delete_adapters("photomaker")
+                # self.pipe.unfuse_lora()
+                # print(f'valid do {self.pipe.active_adapters()}')
+                # self.pipe.delete_adapters("photomaker")
+                # print(f'valid posle {self.pipe.active_adapters()}')
                 val_logs = self._evaluation_epoch(epoch, part, dataloader)
+                allocated = torch.cuda.memory_allocated(self.device)
+                reserved = torch.cuda.memory_reserved(self.device)
+                print(f"{epoch} after val Memory allocated on {self.device}: {allocated / (1024 ** 2):.2f} MiB")
+                print(f"{epoch} after val Memory reserved on {self.device}: {reserved / (1024 ** 2):.2f} MiB")
                 logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
+        
+        # torch.cuda.empty_cache()
+        # gc.collect()
 
         return logs
 
@@ -307,30 +354,69 @@ class BaseTrainer:
         Returns:
             logs (dict): logs that contain the information about evaluation.
         """
+        allocated = torch.cuda.memory_allocated(self.device)
+        reserved = torch.cuda.memory_reserved(self.device)
+
+        print(f"{epoch} before offload Memory allocated on {self.device}: {allocated / (1024 ** 2):.2f} MiB")
+        print(f"{epoch} before offload Memory reserved on {self.device}: {reserved / (1024 ** 2):.2f} MiB")
+        # self.model.to('cpu')
+        allocated = torch.cuda.memory_allocated(self.device)
+        reserved = torch.cuda.memory_reserved(self.device)
+
+        print(f"{epoch} after offload Memory allocated on {self.device}: {allocated / (1024 ** 2):.2f} MiB")
+        print(f"{epoch} after offload Memory reserved on {self.device}: {reserved / (1024 ** 2):.2f} MiB")
         self.is_train = False
         self.evaluation_metrics.reset()
-
+        pid = os.getpid()
         torch.cuda.empty_cache()
-        self.pipe.to(self.device)
-        self.pipe.load_photomaker_adapter(
-            self.model.state_dict(),
+        gc.collect()
+        allocated = torch.cuda.memory_allocated(self.device)
+        reserved = torch.cuda.memory_reserved(self.device)
+
+        print(f"{epoch} before pipe Memory allocated on {self.device}: {allocated / (1024 ** 2):.2f} MiB")
+        print(f"{epoch} before pipe Memory reserved on {self.device}: {reserved / (1024 ** 2):.2f} MiB")
+        pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
+            'stabilityai/stable-diffusion-xl-base-1.0', #'SG161222/RealVisXL_V3.0',  
+            torch_dtype=torch.float16, 
+            use_safetensors=True, 
+            variant="fp16"
+        ).to(self.device)
+
+        pipe.load_photomaker_adapter(
+            self.accelerator.unwrap_model(self.model).get_state_dict(),
+            # unet_model=self.accelerator.unwrap_model(self.model).unet,
+            # id_encoder_model=self.accelerator.unwrap_model(self.model).id_encoder,
             trigger_word="img"
         )
 
-        self.pipe.id_encoder.to(self.device)
-        self.pipe.scheduler = EulerDiscreteScheduler.from_config(self.pipe.scheduler.config)
-        self.pipe.fuse_lora()
-        self.pipe.to(self.device)
+        pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+        pipe.fuse_lora()
+        allocated = torch.cuda.memory_allocated(self.device)
+        reserved = torch.cuda.memory_reserved(self.device)
+
+        print(f"{epoch} after pipe Memory allocated on {self.device}: {allocated / (1024 ** 2):.2f} MiB")
+        print(f"{epoch} after pipe Memory reserved on {self.device}: {reserved / (1024 ** 2):.2f} MiB")
+        # self.pipe.to(self.device)
+        # self.pipe.load_photomaker_adapter(
+        #     self.model.state_dict(),
+        #     trigger_word="img"
+        # )
+
+        # self.pipe.id_encoder.to(self.device)
+        # self.pipe.scheduler = EulerDiscreteScheduler.from_config(self.pipe.scheduler.config)
+        # self.pipe.fuse_lora()
+        # self.pipe.to(self.device)
 
         self.writer.set_step(epoch * self.epoch_len, part)
         with torch.no_grad():
             for batch_idx, batch in tqdm(
                 enumerate(dataloader),
-                desc=part,
+                desc=f'{part}_{epoch}_{pid}',
                 total=len(dataloader),
             ):
                 batch = self.process_evaluation_batch(
                     batch,
+                    pipe,
                     metrics=self.evaluation_metrics,
                 )
                 self._log_batch(
@@ -338,9 +424,17 @@ class BaseTrainer:
                 )  # log only the last batch during inference
             self._log_scalars(self.evaluation_metrics, part="")
 
-        self.pipe.to('cpu')
+        # self.pipe.to('cpu')
+
+        # pipe.to('cpu')
         # pipe = None
         # torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.is_train = True
+        # self.accelerator.unwrap_model(self.model).unet.to(dtype=torch.float32)
+        # self.accelerator.unwrap_model(self.model).id_encoder.to(dtype=torch.float32)
+        # self.model.to(self.device)
         return self.evaluation_metrics.result()
 
     def _monitor_performance(self, logs, not_improved_count):
@@ -441,7 +535,7 @@ class BaseTrainer:
         config.trainer.max_grad_norm
         """
         if self.config["trainer"].get("max_grad_norm", None) is not None:
-            params_to_optimize = filter(lambda p: p.requires_grad, self.model.unet.parameters())
+            params_to_optimize = filter(lambda p: p.requires_grad, self.accelerator.unwrap_model(self.model).unet.parameters())
             self.accelerator.clip_grad_norm_(
                 params_to_optimize, self.config["trainer"]["max_grad_norm"]
             )
@@ -456,7 +550,7 @@ class BaseTrainer:
         Returns:
             total_norm (float): the calculated norm.
         """
-        parameters = filter(lambda p: p.requires_grad, self.model.unet.parameters())
+        parameters = filter(lambda p: p.requires_grad, self.accelerator.unwrap_model(self.model).unet.parameters())
         if isinstance(parameters, torch.Tensor):
             parameters = [parameters]
         parameters = [p for p in parameters if p.grad is not None]
@@ -464,7 +558,7 @@ class BaseTrainer:
             torch.stack([torch.norm(p.grad.detach(), norm_type) for p in parameters]),
             norm_type,
         )
-        return total_norm #.item()
+        return total_norm.item()
 
     def _progress(self, batch_idx):
         """

@@ -8,6 +8,14 @@ pandas
 wandb
 comet_ml
 hydra-core
+accelerate
+diffusers
+peft
+git+https://github.com/openai/CLIP.git
+albucore==0.0.14
+albumentations==1.4.14
+insightface==0.7.3
+
 
 black
 isort
