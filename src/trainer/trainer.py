@@ -91,6 +91,7 @@ class Trainer(BaseTrainer):
 
         for met in self.metrics['inference']:
             metrics.update("val/" + met.name, met(**batch))
+            
         return batch
         
     def _log_batch(self, batch_idx, batch, mode="train"):
