@@ -20,6 +20,14 @@ from src.model.photomaker.pipeline_orig import PhotoMakerStableDiffusionXLPipeli
 from diffusers import EulerDiscreteScheduler
 from src.logger.utils import BaseTimer
 from itertools import chain
+import os
+
+import subprocess
+from src.utils.init_utils import set_random_seed
+
+def get_nvidia_smi_output():
+    result = subprocess.run(["nvidia-smi"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return result.stdout
 
 
 class BaseTrainer:
@@ -30,7 +38,7 @@ class BaseTrainer:
     def __init__(
         self,
         model,
-        # pipe,
+        accelerator,
         criterion,
         metrics,
         optimizer,
@@ -80,7 +88,7 @@ class BaseTrainer:
         self.log_step = config.trainer.get("log_step", 50)
 
         self.model = model
-        # self.pipe = pipe
+        self.accelerator = accelerator
         self.criterion = criterion
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
@@ -170,7 +178,8 @@ class BaseTrainer:
         try:
             self._train_process()
         except KeyboardInterrupt as e:
-            self.logger.info("Saving model on keyboard interrupt")
+            if self.accelerator.is_main_process:
+                self.logger.info("Saving model on keyboard interrupt")
             self._save_checkpoint(self._last_epoch, save_best=False)
             raise e
 
@@ -187,25 +196,26 @@ class BaseTrainer:
             self._last_epoch = epoch
             result = self._train_epoch(epoch)
 
-            # save logged information into logs dict
-            logs = {"epoch": epoch}
-            logs.update(result)
+            if self.accelerator.is_main_process:
+                # save logged information into logs dict
+                logs = {"epoch": epoch}
+                logs.update(result)
 
-            # print logged information to the screen
-            for key, value in logs.items():
-                self.logger.info(f"    {key:15s}: {value}")
+                # print logged information to the screen
+                for key, value in logs.items():
+                    self.logger.info(f"    {key:15s}: {value}")
 
-            # evaluate model performance according to configured metric,
-            # save best checkpoint as model_best
-            best, stop_process, not_improved_count = self._monitor_performance(
-                logs, not_improved_count
-            )
+                # evaluate model performance according to configured metric,
+                # save best checkpoint as model_best
+                best, stop_process, not_improved_count = self._monitor_performance(
+                    logs, not_improved_count
+                )
 
-            if epoch % self.save_period == 0 or best:
-                self._save_checkpoint(epoch, save_best=best, only_best=True)
+                if epoch % self.save_period == 0 or best:
+                    self._save_checkpoint(epoch, save_best=best, only_best=True)
 
-            if stop_process:  # early_stop
-                break
+                if stop_process:  # early_stop
+                    break
 
     def _train_epoch(self, epoch):
         """
@@ -221,11 +231,15 @@ class BaseTrainer:
 
         logs = {}
         self.is_train = True
+        pid = os.getpid()
         self.train_metrics.reset()
-        self.writer.set_step((epoch - 1) * self.epoch_len)
-        self.writer.add_scalar("general/epoch", epoch)
 
-        if epoch == 1:
+        if self.accelerator.is_main_process:
+            # print(epoch, os.getpid(), get_nvidia_smi_output())
+            self.writer.set_step((epoch - 1) * self.epoch_len)
+            self.writer.add_scalar("general/epoch", epoch)
+
+        if epoch == 1 and self.accelerator.is_main_process:
             for part, dataloader in self.evaluation_dataloaders.items():
                 val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
                 logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
@@ -233,7 +247,7 @@ class BaseTrainer:
 
 
         for batch_idx, batch in enumerate(
-            tqdm(self.train_dataloader, desc="train", total=self.epoch_len)
+            tqdm(self.train_dataloader, desc=f"train_{pid}", total=self.epoch_len)
         ):  
             
             try:
@@ -243,7 +257,8 @@ class BaseTrainer:
                 )
             except torch.cuda.OutOfMemoryError as e:
                 if self.skip_oom:
-                    self.logger.warning("OOM on batch. Skipping batch.")
+                    if self.accelerator.is_main_process:
+                        self.logger.warning("OOM on batch. Skipping batch.")
                     torch.cuda.empty_cache()  # free some memory
                     continue
                 else:
@@ -253,20 +268,21 @@ class BaseTrainer:
 
             # log current results
             if batch_idx % self.log_step == 0:
-                self.writer.set_step((epoch - 1) * self.epoch_len + batch_idx)
-                self.logger.debug(
-                    "Train Epoch: {} {} Loss: {:.6f}".format(
-                        epoch, self._progress(batch_idx), batch["loss"].item()
+                if self.accelerator.is_main_process:
+                    self.writer.set_step((epoch - 1) * self.epoch_len + batch_idx)
+                    self.logger.debug(
+                        "Train Epoch: {} {} Reduced Loss: {:.6f}".format(
+                            epoch, self._progress(batch_idx), batch["loss"].item()
+                        )
                     )
-                )
-                self.writer.add_scalar(
-                    "general/lr for lora layers", self.lr_scheduler.get_last_lr()[0]
-                )
-                self.writer.add_scalar(
-                    "general/lr for other modules", self.lr_scheduler.get_last_lr()[1]
-                )
-                self._log_scalars(self.train_metrics, part="train/")
-                self._log_batch(batch_idx, batch)
+                    self.writer.add_scalar(
+                        "general/lr for lora layers", self.lr_scheduler.get_last_lr()[0]
+                    )
+                    self.writer.add_scalar(
+                        "general/lr for other modules", self.lr_scheduler.get_last_lr()[1]
+                    )
+                    self._log_scalars(self.train_metrics, part="train/")
+                    self._log_batch(batch_idx, batch)
                 # we don't want to reset train metrics at the start of every epoch
                 # because we are interested in recent train metrics
                 last_train_metrics = self.train_metrics.result()
@@ -277,11 +293,12 @@ class BaseTrainer:
         logs.update(last_train_metrics)
 
         # Run val/test
-        for part, dataloader in self.evaluation_dataloaders.items():
-            self.pipe.unfuse_lora()
-            self.pipe.delete_adapters("photomaker")
-            val_logs = self._evaluation_epoch(epoch, part, dataloader)
-            logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
+        if self.accelerator.is_main_process:
+            for part, dataloader in self.evaluation_dataloaders.items():
+                self.pipe.unfuse_lora()
+                self.pipe.delete_adapters("photomaker")
+                val_logs = self._evaluation_epoch(epoch, part, dataloader)
+                logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
 
         return logs
 
@@ -300,16 +317,15 @@ class BaseTrainer:
         self.evaluation_metrics.reset()
 
         torch.cuda.empty_cache()
+
         self.pipe.to(self.device)
         self.pipe.load_photomaker_adapter(
-            self.model.state_dict(),
+            self.accelerator.unwrap_model(self.model).get_state_dict(),
             trigger_word="img"
         )
 
-        self.pipe.id_encoder.to(self.device)
         self.pipe.scheduler = EulerDiscreteScheduler.from_config(self.pipe.scheduler.config)
         self.pipe.fuse_lora()
-        self.pipe.to(self.device)
 
         self.writer.set_step(epoch * self.epoch_len, part)
         with torch.no_grad():
@@ -326,9 +342,9 @@ class BaseTrainer:
                     batch_idx, batch, part
                 )  # log only the last batch during inference
             self._log_scalars(self.evaluation_metrics, part="")
+
         self.pipe.to('cpu')
-        # pipe = None
-        # torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
         return self.evaluation_metrics.result()
 
     def _monitor_performance(self, logs, not_improved_count):
@@ -429,8 +445,9 @@ class BaseTrainer:
         config.trainer.max_grad_norm
         """
         if self.config["trainer"].get("max_grad_norm", None) is not None:
-            params_to_optimize = filter(lambda p: p.requires_grad, self.model.unet.parameters())
-            clip_grad_norm_(
+            modules = [self.accelerator.unwrap_model(self.model).unet, self.accelerator.unwrap_model(self.model).id_encoder]  # extend as needed
+            params_to_optimize = chain(*(filter(lambda p: p.requires_grad, m.parameters()) for m in modules))
+            self.accelerator.clip_grad_norm_(
                 params_to_optimize, self.config["trainer"]["max_grad_norm"]
             )
 
@@ -444,7 +461,8 @@ class BaseTrainer:
         Returns:
             total_norm (float): the calculated norm.
         """
-        parameters = filter(lambda p: p.requires_grad, self.model.unet.parameters())
+        modules = [self.accelerator.unwrap_model(self.model).unet, self.accelerator.unwrap_model(self.model).id_encoder]  # extend as needed
+        parameters = chain(*(filter(lambda p: p.requires_grad, m.parameters()) for m in modules))
         if isinstance(parameters, torch.Tensor):
             parameters = [parameters]
         parameters = [p for p in parameters if p.grad is not None]
@@ -513,18 +531,17 @@ class BaseTrainer:
                 'model_best.pth'(do not duplicate the checkpoint as
                 checkpoint-epochEpochNumber.pth)
         """
-        arch = type(self.model).__name__
+        arch = type(self.accelerator.unwrap_model(self.model)).__name__
         state = {
             "arch": arch,
             "epoch": epoch,
-            "state_dict": self.model.state_dict(),
+            "state_dict": self.accelerator.unwrap_model(self.model).get_state_dict(),
             "optimizer": self.optimizer.state_dict(),
             # "lr_scheduler": self.lr_scheduler.state_dict(),
             "monitor_best": self.mnt_best,
             "config": self.config,
         }
-        # torch.save(self.model.state_dict(), 'check_size_64.pth')
-        # exit(0)
+
         filename = str(self.checkpoint_dir / f"checkpoint-epoch{epoch}.pth")
         if not (only_best and save_best):
             torch.save(state, filename)

@@ -124,6 +124,8 @@ calculate_clip.py
 infer_photomaker.py
 *.ipynb
 *.png
+*.sbatch
 
 # pretrained models, etc.
 *.pth
+*.json

@@ -1,10 +1,10 @@
 train:
   _target_: src.datasets.IDDataset
-  data_json_pth: /home/dnbobkov/persongen_denis/persongen/all_gathered.json
+  data_json_pth: filtered_ids2.json
   instance_transforms: ${transforms.instance_transforms.train}
   references_num: 4
 
 val:
   _target_: src.datasets.IDValDataset
-  data_json_pth: /home/dnbobkov/persongen_denis/persongen/all_gathered.json
+  data_json_pth: filtered_ids2.json
 

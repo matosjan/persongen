@@ -64,14 +64,16 @@ def import_model_class_from_model_name_or_path(
     else:
         raise ValueError(f"{model_class} is not supported.")
 
-class PhotoMaker():
-    def __init__(self, pretrained_model_name_or_path, rank, weight_dtype, trigger_word='img'):
+class PhotoMaker(nn.Module):
+    def __init__(self, pretrained_model_name_or_path, rank, weight_dtype, device='cuda', trigger_word='img'):
+        super().__init__()
         self.pretrained_model_name_or_path = pretrained_model_name_or_path
         self.lora_rank = rank
         if weight_dtype == 'fp16':
             self.weight_dtype = torch.float16
         elif weight_dtype == 'fp32':
             self.weight_dtype = torch.float32
+        self.device = device
         self.trigger_word = trigger_word
 
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -129,11 +131,11 @@ class PhotoMaker():
 
         # Move unet, vae and text_encoder to device and cast to weight_dtype
         # The VAE is in float32 to avoid NaN losses.
-        self.unet.to("cuda", dtype=torch.float32)
-        self.vae.to("cuda", dtype=torch.float32)
-        self.text_encoder.to("cuda", dtype=self.weight_dtype)
-        self.text_encoder_2.to("cuda", dtype=self.weight_dtype)
-        self.id_encoder.to("cuda", dtype=torch.float32) 
+        self.unet.to(self.device, dtype=torch.float32)
+        self.vae.to(self.device, dtype=torch.float32)
+        self.text_encoder.to(self.device, dtype=self.weight_dtype)
+        self.text_encoder_2.to(self.device, dtype=self.weight_dtype)
+        self.id_encoder.to(self.device, dtype=torch.float32) 
 
         unet_lora_config = LoraConfig(
             r=self.lora_rank,
@@ -144,7 +146,7 @@ class PhotoMaker():
 
         self.unet.add_adapter(unet_lora_config)
 
-    def state_dict(self):
+    def get_state_dict(self):
         lora_weights = convert_state_dict_to_diffusers(get_peft_model_state_dict(self.unet))
         id_encoder_state_dict = self.id_encoder.state_dict()
 
@@ -175,11 +177,11 @@ class PhotoMaker():
         target_size = [512, 512]
         add_time_ids = list(original_size + crops_coords_top_left + target_size)
         add_time_ids = torch.tensor([add_time_ids])
-        add_time_ids = add_time_ids.to("cuda", dtype=torch.float32)
+        add_time_ids = add_time_ids.to(self.device, dtype=torch.float32)
         return add_time_ids
     
     def forward(self, pixel_values, caption, ref_images, original_sizes, crop_top_lefts, bbox, do_cfg=False, masked_loss=False):
-        pixel_values = pixel_values.cuda() # нужно ли?
+        pixel_values = pixel_values.to(self.device) # нужно ли?
         model_input = self.vae.encode(pixel_values).latent_dist.sample()
         model_input = model_input * self.vae.config.scaling_factor
         
@@ -208,7 +210,6 @@ class PhotoMaker():
         for prompt, refs in zip(caption, ref_images):
             prompt_embeds, pooled_prompt_embeds, class_tokens_mask = self.encode_prompt_with_trigger_word(
                 prompt=prompt,
-                device='cuda',
                 num_id_images=len(refs),
                 do_cfg=do_cfg,
             )
@@ -221,20 +222,22 @@ class PhotoMaker():
         if do_cfg == False:
             class_tokens_mask = torch.concat(class_tokens_mask_list, dim=0)
         #*********************************************************
-        if do_cfg == False:
             all_ref_images_in_batch = list(itertools.chain.from_iterable(ref_images))
             id_pixel_values = self.id_image_processor(all_ref_images_in_batch, return_tensors="pt").pixel_values.unsqueeze(0)
-            id_pixel_values = id_pixel_values.to(device='cuda', dtype=self.id_encoder.dtype)
+            id_pixel_values = id_pixel_values.to(self.device, dtype=self.id_encoder.dtype)
             #*********************************************************
             prompt_embeds = prompt_embeds.to(dtype=self.id_encoder.dtype)
             prompt_embeds = self.id_encoder(id_pixel_values, prompt_embeds, class_tokens_mask)
+        else:
+            dummy = sum(p.sum() for p in self.id_encoder.parameters()) * 0
+            prompt_embeds += dummy
 
         #*********************************************************
         bs_embed, seq_len, _ = prompt_embeds.shape
 
         prompt_embeds = prompt_embeds.view(bs_embed, seq_len, -1).to(dtype=self.unet.dtype)
         add_text_embeds = pooled_prompt_embeds
-        add_text_embeds = add_text_embeds.to('cuda', dtype=self.unet.dtype)
+        add_text_embeds = add_text_embeds.to(self.device, dtype=self.unet.dtype)
         added_cond_kwargs = {"text_embeds": add_text_embeds, "time_ids": add_time_ids}
 
         model_pred = self.unet(
@@ -263,7 +266,6 @@ class PhotoMaker():
     def encode_prompt_with_trigger_word(
         self,
         prompt: str,
-        device: Optional[torch.device] = None,
         prompt_embeds: Optional[torch.Tensor] = None,
         pooled_prompt_embeds: Optional[torch.Tensor] = None,
         ### Added args
@@ -271,8 +273,6 @@ class PhotoMaker():
         class_tokens_mask: Optional[torch.LongTensor] = None,
         do_cfg: bool = False,
     ):
-        device = device or self._execution_device
-
         # Find the token id of the trigger word
         image_token_id = self.tokenizer_2.convert_tokens_to_ids(self.trigger_word)
 
@@ -346,9 +346,9 @@ class PhotoMaker():
                     
                     text_input_ids = torch.tensor(clean_input_ids, dtype=torch.long).unsqueeze(0)
                     class_tokens_mask = torch.tensor(class_tokens_mask, dtype=torch.bool).unsqueeze(0)
-                    class_tokens_mask = class_tokens_mask.to(device=device)                    
+                    class_tokens_mask = class_tokens_mask.to(self.device)                    
 
-                prompt_embeds = text_encoder(text_input_ids.to(device), output_hidden_states=True)
+                prompt_embeds = text_encoder(text_input_ids.to(self.device), output_hidden_states=True)
 
                 # We are only ALWAYS interested in the pooled output of the final text encoder
                 pooled_prompt_embeds = prompt_embeds[0]
@@ -358,9 +358,8 @@ class PhotoMaker():
 
             prompt_embeds = torch.concat(prompt_embeds_list, dim=-1)
 
-        prompt_embeds = prompt_embeds.to(device=device)
+        prompt_embeds = prompt_embeds.to(self.device)
         
-
         bs_embed, _, _ = prompt_embeds.shape
         pooled_prompt_embeds = pooled_prompt_embeds.view(bs_embed, -1)
     

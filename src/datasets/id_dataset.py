@@ -10,7 +10,7 @@ from time import time
 from collections import defaultdict
 
 
-DATA_PREFIX = "/home/aalanov/Bobkov_Denis/datasets/my_original/final"
+DATA_PREFIX = "/home/jovyan/shares/SR006.nfs2/free001style/final"
 
 
 def get_bigger_crop(img, crop, scale=0.2):

@@ -11,14 +11,16 @@ from tqdm import tqdm
 class IDMetric:
     def __init__(
         self,
+        device,
         n_threads=8,
     ):  
-        self.curricular_face_path = "/home/dnbobkov/StyleFeatureEditor/pretrained_models/CurricularFace_Backbone.pth"
+        self.curricular_face_path = "CurricularFace_Backbone.pth"
+        self.device = device
         self.n_threads = n_threads
 
         self.facenet = IR_101(input_size=112)
-        self.facenet.load_state_dict(torch.load(self.curricular_face_path))
-        self.facenet.cuda()
+        self.facenet.load_state_dict(torch.load(self.curricular_face_path, map_location=self.device))
+        self.facenet.to(self.device)
         self.facenet.eval()
 
 
@@ -42,10 +44,10 @@ class IDMetric:
             count += 1
 
             input_im = inp_data[i]
-            input_id = self.facenet(id_transform(input_im.resize((112, 112))).unsqueeze(0).cuda())[0]
+            input_id = self.facenet(id_transform(input_im.resize((112, 112))).unsqueeze(0).to(self.device))[0]
 
             result_im = fake_data[i]
-            result_id = self.facenet(id_transform(result_im.resize((112, 112))).unsqueeze(0).cuda())[0]
+            result_id = self.facenet(id_transform(result_im.resize((112, 112))).unsqueeze(0).to(self.device))[0]
 
             score = float(input_id.dot(result_id))
             scores.append(score)

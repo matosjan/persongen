@@ -4,13 +4,13 @@ import numpy as np
 import clip
 
 class TextSimMetric(BaseMetric):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, device, *args, **kwargs):
         """
         Args:
             name (str | None): metric name to use in logger and writer.
         """
         super().__init__(*args, **kwargs)
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
         self.model, self.preprocess = clip.load("ViT-L/14@336px", device=self.device)
         self.model.eval()
 

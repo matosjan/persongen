@@ -4,11 +4,21 @@ import hydra
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
+from accelerate import Accelerator
 
 from src.datasets.data_utils import get_dataloaders
 from src.trainer import Trainer
 from src.utils.init_utils import set_random_seed, setup_saving_and_logging
 import itertools
+import os
+
+import subprocess
+from src.utils.init_utils import set_random_seed
+
+def get_nvidia_smi_output():
+    result = subprocess.run(["nvidia-smi"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return result.stdout
+
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -26,26 +36,34 @@ def main(config):
     set_random_seed(config.trainer.seed)
     print(config.model.rank)
 
-    project_config = OmegaConf.to_container(config)
-    logger = setup_saving_and_logging(config)
-    writer = instantiate(config.writer, logger, project_config)
+    accelerator = Accelerator()
 
-    if config.trainer.device == "auto":
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+    project_config = OmegaConf.to_container(config)
+    if accelerator.is_main_process:
+        logger = setup_saving_and_logging(config)
+        writer = instantiate(config.writer, logger, project_config)
     else:
-        device = config.trainer.device
+        logger = None
+        writer = None
+
+    device = accelerator.device
 
     # setup data_loader instances
     # batch_transforms should be put on device
     dataloaders, batch_transforms = get_dataloaders(config, device)
 
     # build model architecture, then print to console
-    model = instantiate(config.model)
-    logger.info(model)
+    model = instantiate(config.model, device=device)
+    # logger.info(model)
 
     # get function handles of loss and metrics
     loss_function = instantiate(config.loss_function).to(device)
-    metrics = instantiate(config.metrics)
+    metrics = {"train": [], "inference": []}
+    for metric_type in ["train", "inference"]:
+        for metric_config in config.metrics.get(metric_type, []):
+            metrics[metric_type].append(
+                instantiate(metric_config, device=device)
+            )
 
     # build optimizer, learning rate scheduler
     lora_params = filter(lambda p: p.requires_grad, model.unet.parameters())
@@ -63,9 +81,17 @@ def main(config):
     # epoch_len = None or len(dataloader) for epoch-based training
     epoch_len = config.trainer.get("epoch_len")
 
+    train_dataloader = dataloaders["train"]
+
+    model, optimizer, lr_scheduler = accelerator.prepare(
+        model, optimizer, lr_scheduler
+    )
+
+    dataloaders["train"] = train_dataloader
+
     trainer = Trainer(
         model=model,
-        # pipe=pipe,
+        accelerator=accelerator,
         criterion=loss_function,
         metrics=metrics,
         optimizer=optimizer,
@@ -81,6 +107,7 @@ def main(config):
     )
 
     trainer.train()
+    accelerator.end_training()
 
 
 if __name__ == "__main__":

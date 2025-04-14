@@ -42,7 +42,7 @@ class Trainer(BaseTrainer):
         #######################
         do_cfg =  (torch.rand(1) < 0.1).item()
         masked_loss = (torch.rand(1) < 0.5).item()
-        output = self.model.forward(**batch, do_cfg=do_cfg, masked_loss=masked_loss)
+        output = self.model(**batch, do_cfg=do_cfg, masked_loss=masked_loss)
         batch.update(output)
 
         #######################
@@ -51,23 +51,26 @@ class Trainer(BaseTrainer):
         assert torch.isfinite(batch["loss"])
 
         if self.is_train:
-            batch["loss"].backward()  # sum of all losses is always called loss
+            self.accelerator.backward(batch["loss"]) # sum of all losses is always called loss
             self._clip_grad_norm()
             self.optimizer.step()
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
 
         # update metrics for each loss (in case of multiple losses)
+
         for loss_name in self.config.writer.loss_names:
+            batch["loss"] = self.accelerator.gather(batch["loss"]).mean()
             metrics.update("train/" + loss_name, batch[loss_name].item())
 
         for met in metric_funcs:
-            metrics.update("train/" + met.name, met(**batch))
+            mean_metric = self.accelerator.gather(met(**batch)).mean()
+            metrics.update("train/" + met.name, mean_metric)
 
         return batch
     
     def process_evaluation_batch(self, batch, pipe=None, metrics = None):
-        generator = torch.Generator(device='cuda').manual_seed(42)
+        generator = torch.Generator(device=self.device).manual_seed(42)
         generated_images = self.pipe(
             prompt=batch['prompt'],
             input_id_images=list(batch['ref_images']),

@@ -14,11 +14,11 @@ def cos_sim(arr1, arr2):
 
 
 class IDSim(BaseMetric):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, device, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
         self.aligner = Aligner()
-        self.metric = IDMetric()
+        self.metric = IDMetric(device=device)
         self.id_embeds = torch.load(ID_EMBEDS_PTH)
 
     def __call__(self, **batch):
