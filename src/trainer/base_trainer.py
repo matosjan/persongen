@@ -164,12 +164,13 @@ class BaseTrainer:
         if config.trainer.get("from_pretrained") is not None:
             self._from_pretrained(config.trainer.get("from_pretrained"))
 
-        self.pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
-            'stabilityai/stable-diffusion-xl-base-1.0', #'SG161222/RealVisXL_V3.0',  
-            torch_dtype=torch.float16, 
-            use_safetensors=True, 
-            variant="fp16"
-        )
+        if self.accelerator.is_main_process:
+            self.pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
+                'stabilityai/stable-diffusion-xl-base-1.0', #'SG161222/RealVisXL_V3.0',  
+                torch_dtype=torch.float16, 
+                use_safetensors=True, 
+                variant="fp16"
+            )
 
     def train(self):
         """
@@ -228,7 +229,6 @@ class BaseTrainer:
             logs (dict): logs that contain the average loss and metric in
                 this epoch.
         """
-
         logs = {}
         self.is_train = True
         pid = os.getpid()
@@ -244,7 +244,8 @@ class BaseTrainer:
                 val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
                 logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
             self.is_train = True
-
+        
+        set_random_seed(self.config.trainer.seed + epoch)
 
         for batch_idx, batch in enumerate(
             tqdm(self.train_dataloader, desc=f"train_{pid}", total=self.epoch_len)

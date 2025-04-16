@@ -4,11 +4,13 @@ import os
 import json
 import numpy as np
 import random
+import PIL
 from PIL import Image
 from src.logger.utils import BaseTimer
 from time import time
 from collections import defaultdict
-
+from tqdm import tqdm
+Image.MAX_IMAGE_PIXELS = 933120000
 
 DATA_PREFIX = "/home/jovyan/shares/SR006.nfs2/free001style/final"
 
@@ -48,34 +50,40 @@ class IDDataset(BaseDataset):
             data_json = json.load(f)
 
 
-        self.faces = {}
-        self.images = {}
-        self.sizes = {}
+        # self.faces = {}
+        # self.images = {}
+        # self.sizes = {}
+
+        # index = []
+        # self.ids = []
+        # for k, v in tqdm(data_json.items()):
+        #     if k in ["ji_sung", "nm0001841"]: #["nm4139037", "nm2955013", "nm8402992"]:
+        #         # v.update({"img_path": "", "caption": ""})
+        #         index.append(v)
+        #         self.ids.append(k)
+        #         self.faces[k] = {}
+        #         self.images[k]  = {}
+        #         self.sizes[k]  = {}
+
+        #         for img_name in v.keys():
+        #             img = Image.open(f"{DATA_PREFIX}/{k}/{img_name}.jpg")
+        #             self.images[k][img_name] = img.resize((512, 512))
+        #             self.sizes[k][img_name] = img.size[0]
+
+        #             crop = v[img_name]['new_face_crop']
+        #             face_img = get_bigger_crop(img, crop=crop)
+        #             self.faces[k][img_name] = face_img
+
 
         index = []
         self.ids = []
-        for k, v in data_json.items():
-            if k in ["ji_sung", "nm0001841"]: #["nm4139037", "nm2955013", "nm8402992"]:
-                # v.update({"img_path": "", "caption": ""})
-                index.append(v)
-                self.ids.append(k)
-                self.faces[k] = {}
-                self.images[k]  = {}
-                self.sizes[k]  = {}
-
-                for img_name in v.keys():
-                    img = Image.open(f"{DATA_PREFIX}/{k}/{img_name}.jpg")
-                    self.images[k][img_name] = img.resize((512, 512))
-                    self.sizes[k][img_name] = img.size[0]
-
-                    crop = v[img_name]['new_face_crop']
-                    face_img = get_bigger_crop(img, crop=crop)
-                    self.faces[k][img_name] = face_img
-
+        for k, v in tqdm(data_json.items()):
+            index.append(v)
+            self.ids.append(k)
 
         # to increase bs, delete it
-        index = index * 10
-        self.ids = self.ids * 10
+        index = index
+        self.ids = self.ids
             
         super().__init__(index, *args, **kwargs)
 
@@ -97,7 +105,10 @@ class IDDataset(BaseDataset):
         """
         id_dict = self._index[ind]
         id_images = list(id_dict.keys())
-        num_sampled_images = min(len(id_dict), self.references_num + 1)
+        id = self.ids[ind]
+        # num_ref_images = random.randint(1, 4) if self.ref_num_random==None else self.ref_num_random.randint(1, 4)
+        num_ref_images = random.randint(1, 4)
+        num_sampled_images = min(len(id_dict), num_ref_images + 1)
         images_indexes = np.random.choice(len(id_dict), size=num_sampled_images, replace=False)
 
         instance_data = {}
@@ -106,24 +117,26 @@ class IDDataset(BaseDataset):
         for i, index in enumerate(images_indexes):
             img_name = id_images[index]
             img_data = id_dict[img_name]
-            id = self.ids[ind]
 
+            img = Image.open(f"{DATA_PREFIX}/{id}/{img_name}.jpg")
+        
             if i == 0: # target image case
-                instance_data["pixel_values"] = self.images[id][img_name] #img
+                instance_data["pixel_values"] =  img #img
                 instance_data["caption"] = img_data["text"]
 
                 bbox = img_data['new_face_crop']
-                w_rescale_factor = self.sizes[id][img_name] / 512
-                h_rescale_factor = self.sizes[id][img_name] / 512
+                w_rescale_factor = img.width / 512
+                h_rescale_factor = img.height / 512
                 resized_bbox = [bbox[0] // w_rescale_factor, bbox[1] // h_rescale_factor, bbox[2] // w_rescale_factor, bbox[3] // h_rescale_factor]
                 instance_data["bbox"] = resized_bbox
 
             else: # reference image
-                ref_images.append(self.faces[id][img_name])
+                crop = img_data['new_face_crop']
+                ref_images.append(get_bigger_crop(img, crop=crop))
 
 
         instance_data["ref_images"] = ref_images
-        instance_data[ "original_sizes"] = (512, 512)
+        instance_data["original_sizes"] = (512, 512)
         instance_data["crop_top_lefts"] = (0, 0)
 
         instance_data = self.preprocess_data(instance_data)

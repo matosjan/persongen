@@ -43,7 +43,7 @@ def move_batch_transforms_to_device(batch_transforms, device):
                 transforms[transform_name] = transforms[transform_name].to(device)
 
 
-def get_dataloaders(config, device):
+def get_dataloaders(config, device, ddp_rank=None):
     """
     Create dataloaders for each of the dataset partitions.
     Also creates instance and batch transforms.
@@ -63,6 +63,12 @@ def get_dataloaders(config, device):
     move_batch_transforms_to_device(batch_transforms, device)
 
     # dataset partitions init
+    # datasets = {}
+    # for dataset_partition in config.datasets.keys():
+    #     if dataset_partition == 'train':
+    #         datasets[dataset_partition] = instantiate(config.datasets[dataset_partition], ddp_rank=ddp_rank)  # instance transforms are defined inside
+    #     else:
+    #         datasets[dataset_partition] = instantiate(config.datasets[dataset_partition])
     datasets = instantiate(config.datasets)  # instance transforms are defined inside
 
     # dataloaders init

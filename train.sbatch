@@ -16,3 +16,5 @@ source activate photomaker
 export WANDB_API_KEY=034de88c658e0d6f03ee9fd9a618344c075198d9
 
 HYDRA_FULL_ERROR=1 python train.py
+
+NO_ALBUMENTATIONS_UPDATE=1 WANDB_API_KEY=034de88c658e0d6f03ee9fd9a618344c075198d9 HYDRA_FULL_ERROR=1 accelerate launch --config_file=/home/jovyan/shares/SR006.nfs2/matos/persongen_main_version/src/configs/accelerate.yaml train.py model.rank=1 writer.run_name=test_random_cpu trainer.epoch_len=10 dataloader.train.batch_size=2 dataloader.train.num_workers=2 dataloader.train.pin_memory=True datasets.train.references_num=3 validation_args.num_images_per_prompt=5 writer=empty

@@ -50,7 +50,11 @@ def main(config):
 
     # setup data_loader instances
     # batch_transforms should be put on device
-    dataloaders, batch_transforms = get_dataloaders(config, device)
+    # if accelerator.num_processes > 1:
+    #     process_rank = accelerator.process_index
+    # else:
+    #     process_rank = None
+    dataloaders, batch_transforms = get_dataloaders(config, device) #, ddp_rank=process_rank)
 
     # build model architecture, then print to console
     model = instantiate(config.model, device=device)
@@ -83,11 +87,11 @@ def main(config):
 
     train_dataloader = dataloaders["train"]
 
-    model, optimizer, lr_scheduler = accelerator.prepare(
-        model, optimizer, lr_scheduler
+    model, train_dataloader, optimizer, lr_scheduler = accelerator.prepare(
+        model, train_dataloader, optimizer, lr_scheduler
     )
 
-    dataloaders["train"] = train_dataloader
+    dataloaders["train"] = train_dataloader    
 
     trainer = Trainer(
         model=model,

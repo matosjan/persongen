@@ -131,11 +131,11 @@ class PhotoMaker(nn.Module):
 
         # Move unet, vae and text_encoder to device and cast to weight_dtype
         # The VAE is in float32 to avoid NaN losses.
-        self.unet.to(self.device, dtype=torch.float32)
-        self.vae.to(self.device, dtype=torch.float32)
-        self.text_encoder.to(self.device, dtype=self.weight_dtype)
-        self.text_encoder_2.to(self.device, dtype=self.weight_dtype)
-        self.id_encoder.to(self.device, dtype=torch.float32) 
+        self.unet.to(dtype=torch.float32)
+        self.vae.to(dtype=torch.float32)
+        self.text_encoder.to(dtype=self.weight_dtype)
+        self.text_encoder_2.to(dtype=self.weight_dtype)
+        self.id_encoder.to(dtype=torch.float32) 
 
         unet_lora_config = LoraConfig(
             r=self.lora_rank,

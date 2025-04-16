@@ -7,6 +7,7 @@ from src.metrics.tracker import MetricTracker
 from src.trainer.base_trainer import BaseTrainer
 import itertools
 from src.logger.utils import BaseTimer
+import os
 
 
 class Trainer(BaseTrainer):
@@ -48,10 +49,16 @@ class Trainer(BaseTrainer):
         #######################
         all_losses = self.criterion(**batch)
         batch.update(all_losses)
-        assert torch.isfinite(batch["loss"])
-
+        try:
+            assert torch.isfinite(batch["loss"])
+        except AssertionError as e:
+            print(masked_loss)
+            for pred, target, box in zip(batch['model_pred'], batch['target'], batch['bbox']):
+                print(pred.shape, target.shape, box)
+            raise e
         if self.is_train:
             self.accelerator.backward(batch["loss"]) # sum of all losses is always called loss
+            # print(os.getpid(), [len(a) for a in batch['ref_images']], do_cfg, masked_loss)
             self._clip_grad_norm()
             self.optimizer.step()
             if self.lr_scheduler is not None:
@@ -70,7 +77,7 @@ class Trainer(BaseTrainer):
         return batch
     
     def process_evaluation_batch(self, batch, pipe=None, metrics = None):
-        generator = torch.Generator(device=self.device).manual_seed(42)
+        generator = torch.Generator(device='cpu').manual_seed(42)
         generated_images = self.pipe(
             prompt=batch['prompt'],
             input_id_images=list(batch['ref_images']),

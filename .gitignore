@@ -129,3 +129,5 @@ infer_photomaker.py
 # pretrained models, etc.
 *.pth
 *.json
+*.bin
+test.py
