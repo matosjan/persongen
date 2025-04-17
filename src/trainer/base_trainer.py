@@ -139,7 +139,7 @@ class BaseTrainer:
 
         # define metrics
         self.metrics = metrics
-        train_metrics_names = ["train/" + m for m in self.config.writer.loss_names] + ["train/grad_norm"] + ["train/" + m.name for m in self.metrics["train"]]
+        train_metrics_names = ["train/" + m for m in self.config.writer.loss_names] + ["train/total_grad_norm", "train/unet_grad_norm", "train/id_enc_grad_norm"] + ["train/" + m.name for m in self.metrics["train"]]
         self.train_metrics = MetricTracker(
             *train_metrics_names,
             writer=self.writer,
@@ -265,7 +265,10 @@ class BaseTrainer:
                 else:
                     raise e
 
-            self.train_metrics.update("train/grad_norm", self._get_grad_norm())
+            total_norm, unet_norm, id_encoder_norm = self._get_grad_norm()
+            self.train_metrics.update("train/total_grad_norm", total_norm)
+            self.train_metrics.update("train/unet_grad_norm", unet_norm)
+            self.train_metrics.update("train/id_enc_grad_norm", id_encoder_norm)
 
             # log current results
             if batch_idx % self.log_step == 0:
@@ -462,16 +465,25 @@ class BaseTrainer:
         Returns:
             total_norm (float): the calculated norm.
         """
-        modules = [self.accelerator.unwrap_model(self.model).unet, self.accelerator.unwrap_model(self.model).id_encoder]  # extend as needed
-        parameters = chain(*(filter(lambda p: p.requires_grad, m.parameters()) for m in modules))
-        if isinstance(parameters, torch.Tensor):
-            parameters = [parameters]
-        parameters = [p for p in parameters if p.grad is not None]
-        total_norm = torch.norm(
-            torch.stack([torch.norm(p.grad.detach(), norm_type) for p in parameters]),
-            norm_type,
-        )
-        return total_norm.item()
+        model = self.accelerator.unwrap_model(self.model)
+        unet = model.unet
+        id_encoder = model.id_encoder
+
+        # Helper function to compute norm for a module
+        def compute_module_grad_norm(module):
+            parameters = [p for p in module.parameters() if p.requires_grad and p.grad is not None]
+            if not parameters:
+                return 0.0
+            return torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type) for p in parameters]), norm_type).item()
+
+        # Compute individual norms
+        unet_norm = compute_module_grad_norm(unet)
+        id_encoder_norm = compute_module_grad_norm(id_encoder)
+
+        # Compute total norm
+        total_norm = torch.norm(torch.tensor([unet_norm, id_encoder_norm]), norm_type).item()
+
+        return total_norm, unet_norm, id_encoder_norm
 
     def _progress(self, batch_idx):
         """

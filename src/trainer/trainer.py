@@ -41,8 +41,8 @@ class Trainer(BaseTrainer):
             self.optimizer.zero_grad()
             
         #######################
-        do_cfg =  (torch.rand(1) < 0.1).item()
-        masked_loss = (torch.rand(1) < 0.5).item()
+        do_cfg =  (torch.rand(1) < self.config.hyperparams.masked_loss_p).item()
+        masked_loss = (torch.rand(1) < self.config.hyperparams.do_cfg_p).item()
         output = self.model(**batch, do_cfg=do_cfg, masked_loss=masked_loss)
         batch.update(output)
 
