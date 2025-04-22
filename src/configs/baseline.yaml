@@ -11,8 +11,10 @@ defaults:
 optimizer:
   _convert_: partial
   _target_: torch.optim.Adam
-lr_for_lora: 1e-4
-lr_for_other: 1e-5
+lr_for_lora: 1e-5
+# lr_for_other: 1e-5
+lr_for_vis_proj: 1e-5
+lr_for_vis_proj2_and_fuse: 1e-4
 
 lr_scheduler:
   _target_: torch.optim.lr_scheduler.ConstantLR # не сохраняю state_dict
@@ -31,6 +33,7 @@ trainer:
   epoch_len: 1000
   # device_tensors: ["pixel_values"] # which tensors should be on device (ex. GPU)
   resume_from: null # null or path to the checkpoint dir with *.pth and config.yaml
+  from_pretrained: null
   device: auto # device name or "auto"
   override: True # if True, will override the previous run with the same name
   monitor: "max val_id_sim" #"max test_MulticlassAccuracy" # "off" or "max/min metric_name", i.e. our goal is to maximize/minimize metric

@@ -139,12 +139,12 @@ class BaseTrainer:
 
         # define metrics
         self.metrics = metrics
-        train_metrics_names = ["train/" + m for m in self.config.writer.loss_names] + ["train/total_grad_norm", "train/unet_grad_norm", "train/id_enc_grad_norm"] + ["train/" + m.name for m in self.metrics["train"]]
+        train_metrics_names = [m for m in self.config.writer.loss_names] + ["total_grad_norm", "unet_grad_norm", "id_enc_grad_norm", "vis_proj_grad_norm", "vis_proj2_fuse_grad_norm"] + [m.name for m in self.metrics["train"]]
         self.train_metrics = MetricTracker(
             *train_metrics_names,
             writer=self.writer,
         )
-        val_metrics_names = ["val/" + m for m in self.config.writer.loss_names] + ["val/" + m.name for m in self.metrics["inference"]]
+        val_metrics_names = [m for m in self.config.writer.loss_names] + [m.name for m in self.metrics["inference"]]
         self.evaluation_metrics = MetricTracker(
             *val_metrics_names,
             writer=self.writer,
@@ -241,6 +241,8 @@ class BaseTrainer:
 
         if epoch == 1 and self.accelerator.is_main_process:
             for part, dataloader in self.evaluation_dataloaders.items():
+                self.pipe.unfuse_lora()
+                self.pipe.delete_adapters("photomaker")
                 val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
                 logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
             self.is_train = True
@@ -265,11 +267,13 @@ class BaseTrainer:
                 else:
                     raise e
 
-            total_norm, unet_norm, id_encoder_norm = self._get_grad_norm()
-            self.train_metrics.update("train/total_grad_norm", total_norm)
-            self.train_metrics.update("train/unet_grad_norm", unet_norm)
-            self.train_metrics.update("train/id_enc_grad_norm", id_encoder_norm)
-
+            total_norm, unet_norm, id_encoder_norm, vis_proj_norm, vis_proj_2_and_fuse_norm = self._get_grad_norm()
+            self.train_metrics.update("total_grad_norm", total_norm)
+            self.train_metrics.update("unet_grad_norm", unet_norm)
+            self.train_metrics.update("id_enc_grad_norm", id_encoder_norm)
+            self.train_metrics.update("vis_proj_grad_norm", vis_proj_norm)
+            self.train_metrics.update("vis_proj2_fuse_grad_norm", vis_proj_2_and_fuse_norm)
+            
             # log current results
             if batch_idx % self.log_step == 0:
                 if self.accelerator.is_main_process:
@@ -285,6 +289,14 @@ class BaseTrainer:
                     self.writer.add_scalar(
                         "general/lr for other modules", self.lr_scheduler.get_last_lr()[1]
                     )
+
+                    # self.writer.add_scalar(
+                    #     "general/lr for vis_proj", self.lr_scheduler.get_last_lr()[1]
+                    # )
+                    # self.writer.add_scalar(
+                    #     "general/lr for vis_proj2 and fuse", self.lr_scheduler.get_last_lr()[2]
+                    # )
+
                     self._log_scalars(self.train_metrics, part="train/")
                     self._log_batch(batch_idx, batch)
                 # we don't want to reset train metrics at the start of every epoch
@@ -345,8 +357,7 @@ class BaseTrainer:
                 self._log_batch(
                     batch_idx, batch, part
                 )  # log only the last batch during inference
-            self._log_scalars(self.evaluation_metrics, part="")
-
+            self._log_scalars(self.evaluation_metrics, part=f'{part}/')
         self.pipe.to('cpu')
         torch.cuda.empty_cache()
         return self.evaluation_metrics.result()
@@ -479,11 +490,15 @@ class BaseTrainer:
         # Compute individual norms
         unet_norm = compute_module_grad_norm(unet)
         id_encoder_norm = compute_module_grad_norm(id_encoder)
+        vis_proj_norm = compute_module_grad_norm(id_encoder.visual_projection)
+        vis_proj_2_norm = compute_module_grad_norm(id_encoder.visual_projection_2)
+        fuse_module_norm = compute_module_grad_norm(id_encoder.fuse_module)
 
         # Compute total norm
         total_norm = torch.norm(torch.tensor([unet_norm, id_encoder_norm]), norm_type).item()
+        vis_proj_2_and_fuse_norm = torch.norm(torch.tensor([vis_proj_2_norm, fuse_module_norm]), norm_type).item()
 
-        return total_norm, unet_norm, id_encoder_norm
+        return total_norm, unet_norm, id_encoder_norm, vis_proj_norm, vis_proj_2_and_fuse_norm
 
     def _progress(self, batch_idx):
         """
@@ -581,36 +596,39 @@ class BaseTrainer:
             resume_path (str): Path to the checkpoint to be resumed.
         """
         resume_path = str(resume_path)
-        self.logger.info(f"Loading checkpoint: {resume_path} ...")
+        if self.accelerator.is_main_process:
+            self.logger.info(f"Loading checkpoint: {resume_path} ...")
         checkpoint = torch.load(resume_path, self.device)
         self.start_epoch = checkpoint["epoch"] + 1
         self.mnt_best = checkpoint["monitor_best"]
 
         # load architecture params from checkpoint.
         if checkpoint["config"]["model"] != self.config["model"]:
-            self.logger.warning(
-                "Warning: Architecture configuration given in the config file is different from that "
-                "of the checkpoint. This may yield an exception when state_dict is loaded."
-            )
-        self.model.load_state_dict(checkpoint["state_dict"])
+            if self.accelerator.is_main_process:
+                self.logger.warning(
+                    "Warning: Architecture configuration given in the config file is different from that "
+                    "of the checkpoint. This may yield an exception when state_dict is loaded."
+                )
+        self.accelerator.unwrap_model(self.model).load_state_dict_(checkpoint["state_dict"])
 
         # load optimizer state from checkpoint only when optimizer type is not changed.
         if (
             checkpoint["config"]["optimizer"] != self.config["optimizer"]
-            or checkpoint["config"]["lr_scheduler"] != self.config["lr_scheduler"]
+            # or checkpoint["config"]["lr_scheduler"] != self.config["lr_scheduler"]
         ):
-            self.logger.warning(
-                "Warning: Optimizer or lr_scheduler given in the config file is different "
-                "from that of the checkpoint. Optimizer and scheduler parameters "
-                "are not resumed."
-            )
+            if self.accelerator.is_main_process:
+                self.logger.warning(
+                    "Warning: Optimizer or lr_scheduler given in the config file is different "
+                    "from that of the checkpoint. Optimizer and scheduler parameters "
+                    "are not resumed."
+                )
         else:
             self.optimizer.load_state_dict(checkpoint["optimizer"])
-            self.lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
-
-        self.logger.info(
-            f"Checkpoint loaded. Resume training from epoch {self.start_epoch}"
-        )
+            # self.lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
+        if self.accelerator.is_main_process:
+            self.logger.info(
+                f"Checkpoint loaded. Resume training from epoch {self.start_epoch}"
+            )
 
     def _from_pretrained(self, pretrained_path):
         """
@@ -625,12 +643,13 @@ class BaseTrainer:
         """
         pretrained_path = str(pretrained_path)
         if hasattr(self, "logger"):  # to support both trainer and inferencer
-            self.logger.info(f"Loading model weights from: {pretrained_path} ...")
+            if self.accelerator.is_main_process:
+                self.logger.info(f"Loading model weights from: {pretrained_path} ...")
         else:
             print(f"Loading model weights from: {pretrained_path} ...")
         checkpoint = torch.load(pretrained_path, self.device)
 
         if checkpoint.get("state_dict") is not None:
-            self.model.load_state_dict(checkpoint["state_dict"])
+            self.accelerator.unwrap_model(self.model).load_state_dict_(checkpoint["state_dict"])
         else:
-            self.model.load_state_dict(checkpoint)
+            self.accelerator.unwrap_model(self.model).load_state_dict_(checkpoint)

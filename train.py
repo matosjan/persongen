@@ -14,6 +14,8 @@ import os
 
 import subprocess
 from src.utils.init_utils import set_random_seed
+import datetime
+import torch.distributed
 
 def get_nvidia_smi_output():
     result = subprocess.run(["nvidia-smi"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -33,8 +35,10 @@ def main(config):
     Args:
         config (DictConfig): hydra experiment config.
     """
+    torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=3600))
     set_random_seed(config.trainer.seed)
     print(config.model.rank)
+    print(os.getpid())
 
     accelerator = Accelerator()
 
@@ -58,6 +62,7 @@ def main(config):
 
     # build model architecture, then print to console
     model = instantiate(config.model, device=device)
+    print(device)
     # logger.info(model)
 
     # get function handles of loss and metrics
@@ -72,9 +77,13 @@ def main(config):
     # build optimizer, learning rate scheduler
     lora_params = filter(lambda p: p.requires_grad, model.unet.parameters())
     other_params =  filter(lambda p: p.requires_grad, model.id_encoder.parameters())
+    # visual_projection_params = filter(lambda p: p.requires_grad, model.id_encoder.visual_projection.parameters())
+    # visual_projection_2_and_fuse_params = filter(lambda p: p.requires_grad, itertools.chain(model.id_encoder.visual_projection_2.parameters(), model.id_encoder.fuse_module.parameters()))
     trainable_params = [
         {'params': lora_params, 'lr': config.lr_for_lora},
         {'params': other_params, 'lr': config.lr_for_other}
+        # {'params': visual_projection_params, 'lr': config.lr_for_vis_proj},
+        # {'params': visual_projection_2_and_fuse_params, 'lr': config.lr_for_vis_proj2_and_fuse},
     ]
 
     optimizer = instantiate(config.optimizer, params=trainable_params)
@@ -91,7 +100,13 @@ def main(config):
         model, train_dataloader, optimizer, lr_scheduler
     )
 
-    dataloaders["train"] = train_dataloader    
+    dataloaders["train"] = train_dataloader
+
+    # allocated = torch.cuda.memory_allocated(device)
+    # reserved = torch.cuda.memory_reserved(device)
+
+    # print(f"{os.getpid()} Allocated memory: {allocated / (1024 ** 2):.2f} MB")
+    # print(f"{os.getpid()} Reserved memory: {reserved / (1024 ** 2):.2f} MB")   
 
     trainer = Trainer(
         model=model,

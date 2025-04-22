@@ -238,7 +238,9 @@ class PhotoMakerStableDiffusionXLPipeline(StableDiffusionXLPipeline):
 
         # load lora into models
         # print(f"Loading PhotoMaker {pm_version} components [2] lora_weights from [{pretrained_model_name_or_path_or_dict}]")
-        self.load_lora_weights(state_dict["lora_weights"], adapter_name="photomaker")
+        if state_dict.get('lora_weights') is not None:
+            self.load_lora_weights(state_dict["lora_weights"], adapter_name="photomaker")
+            print('Loaded lora layers into pipeline')
 
         # Add trigger word token
         if self.tokenizer is not None: 

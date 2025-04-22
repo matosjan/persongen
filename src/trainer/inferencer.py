@@ -124,7 +124,7 @@ class Inferencer(BaseTrainer):
                 and model outputs.
         """
 
-        generator = torch.Generator(device='cuda').manual_seed(42)
+        generator = torch.Generator(device='cpu').manual_seed(42)
         generated_images = pipe(
             prompt=batch['prompt'],
             input_id_images=list(batch['ref_images']),
@@ -145,10 +145,6 @@ class Inferencer(BaseTrainer):
 
         for metric in self.metrics['inference']:
             metrics.update(metric.name, metric(**batch))
-        return batch
-
-
-
         return batch
 
     def _inference_part(self, part, dataloader):
@@ -177,7 +173,7 @@ class Inferencer(BaseTrainer):
             variant="fp16"
         )
         pipe.load_photomaker_adapter(
-            self.model.state_dict(),
+            self.model.get_state_dict(),
             trigger_word="img"
         )
         pipe.id_encoder.to(self.device)

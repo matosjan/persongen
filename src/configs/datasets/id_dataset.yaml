@@ -8,3 +8,6 @@ val:
   _target_: src.datasets.IDValDataset
   data_json_pth: filtered_ids3_beta.json
 
+ood_val:
+  _target_: src.datasets.OODValDataset
+  data_json_pth: add_val_ids.json

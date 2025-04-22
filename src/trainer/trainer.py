@@ -41,8 +41,8 @@ class Trainer(BaseTrainer):
             self.optimizer.zero_grad()
             
         #######################
-        do_cfg =  (torch.rand(1) < self.config.hyperparams.masked_loss_p).item()
-        masked_loss = (torch.rand(1) < self.config.hyperparams.do_cfg_p).item()
+        do_cfg =  (torch.rand(1) < self.config.hyperparams.do_cfg_p).item()
+        masked_loss = (torch.rand(1) < self.config.hyperparams.masked_loss_p).item()
         output = self.model(**batch, do_cfg=do_cfg, masked_loss=masked_loss)
         batch.update(output)
 
@@ -68,15 +68,15 @@ class Trainer(BaseTrainer):
 
         for loss_name in self.config.writer.loss_names:
             batch["loss"] = self.accelerator.gather(batch["loss"]).mean()
-            metrics.update("train/" + loss_name, batch[loss_name].item())
+            metrics.update(loss_name, batch[loss_name].item())
 
         for met in metric_funcs:
             mean_metric = self.accelerator.gather(met(**batch)).mean()
-            metrics.update("train/" + met.name, mean_metric)
+            metrics.update(met.name, mean_metric)
 
         return batch
     
-    def process_evaluation_batch(self, batch, pipe=None, metrics = None):
+    def process_evaluation_batch(self, batch, metrics=None, part='val/'):
         generator = torch.Generator(device='cpu').manual_seed(42)
         generated_images = self.pipe(
             prompt=batch['prompt'],
@@ -88,7 +88,7 @@ class Trainer(BaseTrainer):
         batch[f'generated'] = generated_images
 
         for met in self.metrics['inference']:
-            metrics.update("val/" + met.name, met(**batch))
+            metrics.update(met.name, met(**batch))
         return batch
         
 
@@ -124,6 +124,6 @@ class Trainer(BaseTrainer):
             image_arrays = [np.array(ref_img.resize((256, 256))), np.array(generated_img.resize((256, 256)))]
             concated_image = Image.fromarray(np.concatenate(image_arrays, axis=1))
 
-            image_name = f"val_images/{batch['id']}/{batch['image_name']}/{prompt[:30]}..."
+            image_name = f"{mode}_images/{batch['id']}/{batch['image_name']}/{prompt[:30]}..."
             self.writer.add_image(image_name, concated_image)
 

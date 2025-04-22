@@ -17,4 +17,8 @@ export WANDB_API_KEY=034de88c658e0d6f03ee9fd9a618344c075198d9
 
 HYDRA_FULL_ERROR=1 python train.py
 
-NO_ALBUMENTATIONS_UPDATE=1 WANDB_API_KEY=034de88c658e0d6f03ee9fd9a618344c075198d9 HYDRA_FULL_ERROR=1 accelerate launch --config_file=src/configs/ddp/accelerate.yaml train.py model.rank=1 writer.run_name=test_config trainer.epoch_len=10 dataloader.train.batch_size=2 dataloader.train.num_workers=2 dataloader.train.pin_memory=True datasets.train.references_num=3 validation_args.num_images_per_prompt=5
+NO_ALBUMENTATIONS_UPDATE=1 WANDB_API_KEY=034de88c658e0d6f03ee9fd9a618344c075198d9 HYDRA_FULL_ERROR=1 accelerate launch --config_file=src/configs/ddp/accelerate.yaml train.py model.rank=8 writer.run_name=enc_head_lora8 trainer.epoch_len=1000 dataloader.train.batch_size=12 dataloader.train.num_workers=12 dataloader.train.pin_memory=True datasets.train.references_num=3 validation_args.num_images_per_prompt=5
+
+NO_ALBUMENTATIONS_UPDATE=1 WANDB_API_KEY=034de88c658e0d6f03ee9fd9a618344c075198d9 HYDRA_FULL_ERROR=1 accelerate launch --config_file=src/configs/ddp/accelerate.yaml train.py model.rank=1 trainer.resume_from=/home/jovyan/shares/SR006.nfs2/matos/persongen_main_version/saved/enc_head_lora1/checkpoint-epoch55.pth writer.run_name=test trainer.epoch_len=250 dataloader.train.batch_size=12 dataloader.train.num_workers=12 dataloader.train.pin_memory=True datasets.train.references_num=3 validation_args.num_images_per_prompt=5 writer=empty
+
+NO_ALBUMENTATIONS_UPDATE=1 HYDRA_FULL_ERROR=1 python3 -u inference.py inferencer.save_path="test_new_code" inferencer.from_pretrained="saved/only_enc_head/checkpoint-epoch120.pth" model.rank=1 validation_args.num_images_per_prompt=1

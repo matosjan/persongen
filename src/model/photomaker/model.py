@@ -8,6 +8,7 @@ from diffusers import (
     UNet2DConditionModel,
 )
 import PIL
+import os
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 PipelineImageInput = Union[
     PIL.Image.Image,
@@ -128,6 +129,19 @@ class PhotoMaker(nn.Module):
         self.text_encoder_2.requires_grad_(False)
         self.unet.requires_grad_(False)
         self.id_encoder.requires_grad_(True)
+        # self.id_encoder.requires_grad_(False)
+        # # делаем обучаемым первый проекционный слой
+        # for param in self.id_encoder.visual_projection.parameters():
+        #     param.requires_grad = True
+
+        # # делаем обучаемым второй проекционный слой
+        # for param in self.id_encoder.visual_projection_2.parameters():
+        #     param.requires_grad = True
+
+        # # делаем обучаемым весь FuseModule
+        # for param in self.id_encoder.fuse_module.parameters():
+        #     param.requires_grad = True
+
 
         # Move unet, vae and text_encoder to device and cast to weight_dtype
         # The VAE is in float32 to avoid NaN losses.
@@ -135,7 +149,7 @@ class PhotoMaker(nn.Module):
         self.vae.to(dtype=torch.float32)
         self.text_encoder.to(dtype=self.weight_dtype)
         self.text_encoder_2.to(dtype=self.weight_dtype)
-        self.id_encoder.to(dtype=torch.float32) 
+        self.id_encoder.to(dtype=torch.float32)
 
         unet_lora_config = LoraConfig(
             r=self.lora_rank,
@@ -146,6 +160,20 @@ class PhotoMaker(nn.Module):
 
         self.unet.add_adapter(unet_lora_config)
 
+        # lora_params = 0
+        # for name, p in self.unet.named_parameters():
+        #     if p.requires_grad:
+        #         lora_params += 1
+        # print(f'Lora params {lora_params}')
+
+        # encoder_params = 0
+        # for name, p in self.id_encoder.named_parameters():
+        #     if p.requires_grad:
+        #         encoder_params += 1  
+        
+        # print(f'Encoder params {encoder_params}')
+
+
     def get_state_dict(self):
         lora_weights = convert_state_dict_to_diffusers(get_peft_model_state_dict(self.unet))
         id_encoder_state_dict = self.id_encoder.state_dict()
@@ -155,7 +183,7 @@ class PhotoMaker(nn.Module):
             'id_encoder': id_encoder_state_dict,
         }
     
-    def load_state_dict(self, state_dict):
+    def load_state_dict_(self, state_dict):
         self.id_encoder.load_state_dict(state_dict['id_encoder'])
         lora_state_dict = state_dict['lora_weights']
         unet_state_dict = {f'{k.replace("unet.", "")}': v for k, v in lora_state_dict.items()}

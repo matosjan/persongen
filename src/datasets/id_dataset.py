@@ -9,10 +9,12 @@ from PIL import Image
 from src.logger.utils import BaseTimer
 from time import time
 from collections import defaultdict
+from src.id_utils.aligner import Aligner
 from tqdm import tqdm
 Image.MAX_IMAGE_PIXELS = 933120000
 
 DATA_PREFIX = "/home/jovyan/shares/SR006.nfs2/free001style/final"
+OOD_DATA_PREFIX = "/home/jovyan/shares/SR006.nfs2/matos/persongen_main_version/data/additional_val"
 
 
 def get_bigger_crop(img, crop, scale=0.2):
@@ -78,8 +80,9 @@ class IDDataset(BaseDataset):
         index = []
         self.ids = []
         for k, v in tqdm(data_json.items()):
-            index.append(v)
-            self.ids.append(k)
+            if k not in ["ji_sung"]:
+                index.append(v)
+                self.ids.append(k)
 
         # to increase bs, delete it
         index = index
@@ -204,7 +207,70 @@ class IDValDataset(BaseDataset):
         face_img = get_bigger_crop(img, crop=crop)
 
         instance_data["ref_images"] = [face_img] 
-        instance_data[ "original_sizes"] = (512, 512)
+        instance_data["original_sizes"] = (512, 512)
+        instance_data["crop_top_lefts"] = (0, 0)
+
+        instance_data = self.preprocess_data(instance_data)
+        instance_data["id"] = id
+        instance_data["image_name"] = img_name
+        return instance_data
+    
+class OODValDataset(BaseDataset):
+    def __init__(self, data_json_pth=None, *args, **kwargs):
+
+        with open(data_json_pth) as f:
+            data_json = json.load(f)
+
+        captions = [
+        "Photo of a person img looking into the camera, wearing a black cloak and red hat. Daytime, 3 mountains in the background, a medieval castle can be seen on the far right mountain",
+        """A photo of an angry businessman img in a yellow suit, talking on the phone and looking into the camera. He is in the street of a big city: to the left behind him is a bank building with a big sign above it saying "Neon Bank".""",
+        # "A 2d cartoon-style photo of a small but very muscular dwarf img with a long red beard looking into the camera. He has a naked top and is holding a massive battleaxe in his left hand. He is in a tavern, with many tables behind him and a bar with a barman.",
+        " A photo of a man img in a space suit, his face is seen very surprised, he is in the desert near Oathis with lake, palm trees and a couple of camels behind him.",
+        # "A photo of man img with blue hair , looking at the viewer, dressed in a red clown suit and clown make-up seated on a bench with a windmill far behind him.",
+        "A photo of a middle-aged man img in a dark green sweater looking at the viewer, he is in a room with white walls, there is a portrait behind him and a books on a shelf."
+        ]
+
+        index = []
+        for id, id_data in data_json.items():
+            for img_name in id_data.keys():
+                for caption in captions:
+                    img_data = copy(data_json[id][img_name])
+                    img_data.update({"id": id, "img_name": img_name, "img_path": ""})
+                    img_data.update({"caption": caption})
+                    index.append(img_data)
+          
+        super().__init__(index, *args, **kwargs)
+
+
+    def __getitem__(self, ind):
+        """
+        Get element from the index, preprocess it, and combine it
+        into a dict.
+
+        Notice that the choice of key names is defined by the template user.
+        However, they should be consistent across dataset getitem, collate_fn,
+        loss_function forward method, and model forward method.
+
+        Args:
+            ind (int): index in the self.index list.
+        Returns:
+            instance_data (dict): dict, containing instance
+                (a single dataset element).
+        """
+        img_dict = self._index[ind]
+        img_name = img_dict["img_name"]
+        id = img_dict["id"]
+        instance_data = {}
+
+        img = self.load_object(f"{OOD_DATA_PREFIX}/{id}/{img_name}.jpg")
+        instance_data["pixel_values"] = img
+        instance_data["prompt"] = img_dict["caption"]
+
+        crop = img_dict['new_face_crop']
+        face_img = get_bigger_crop(img, crop=crop)
+
+        instance_data["ref_images"] = [face_img] 
+        instance_data["original_sizes"] = (512, 512)
         instance_data["crop_top_lefts"] = (0, 0)
 
         instance_data = self.preprocess_data(instance_data)

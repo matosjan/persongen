@@ -6,7 +6,7 @@ defaults:
   - transforms: example_only_instance
   - _self_
 inferencer:
-  device_tensors: ["data_object", "labels"] # which tensors should be on device (ex. GPU)
+  # device_tensors: ["data_object", "labels"] # which tensors should be on device (ex. GPU)
   device: auto # device name or "auto"
   save_path: "inference_results" # any name here, can be a dataset name
   seed: 1

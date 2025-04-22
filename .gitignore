@@ -131,3 +131,4 @@ infer_photomaker.py
 *.json
 *.bin
 test.py
+inference_results/
