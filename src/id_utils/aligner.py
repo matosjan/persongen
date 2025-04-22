@@ -26,7 +26,7 @@ class Aligner():
                 continue
 
             orig_arr = np.array(orig_img)
-            bbox = sorted(faces, key=lambda x: -(x['bbox'][3] - x['bbox'][1]) * (x['bbox'][2] - x['bbox'][0]))[0]['bbox'].astype(np.int32)
+            faces = sorted(faces, key=lambda x: -(x['bbox'][3] - x['bbox'][1]) * (x['bbox'][2] - x['bbox'][0]))
             bbox = faces[0]['bbox'].astype(np.int32)
             embeds.append(faces[0]['embedding'])
 

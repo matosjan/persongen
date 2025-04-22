@@ -4,7 +4,7 @@ import numpy as np
 import clip
 
 class TextSimMetric(BaseMetric):
-    def __init__(self, device, *args, **kwargs):
+    def __init__(self, device='cuda', *args, **kwargs):
         """
         Args:
             name (str | None): metric name to use in logger and writer.
