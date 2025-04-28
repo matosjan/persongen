@@ -150,7 +150,6 @@ class BaseTrainer:
             writer=self.writer,
         )
 
-
         # define checkpoint dir and init everything if required
 
         self.checkpoint_dir = (
@@ -650,6 +649,6 @@ class BaseTrainer:
         checkpoint = torch.load(pretrained_path, self.device)
 
         if checkpoint.get("state_dict") is not None:
-            self.accelerator.unwrap_model(self.model).load_state_dict_(checkpoint["state_dict"])
+            self.model.load_state_dict_(checkpoint["state_dict"])
         else:
             self.accelerator.unwrap_model(self.model).load_state_dict_(checkpoint)

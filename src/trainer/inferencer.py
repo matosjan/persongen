@@ -8,6 +8,9 @@ from src.model.photomaker.our_pipeline import OurPhotoMakerStableDiffusionXLPipe
 from src.model.photomaker.pipeline_orig import PhotoMakerStableDiffusionXLPipeline
 from diffusers import EulerDiscreteScheduler
 
+import numpy as np
+from PIL import Image
+
 
 class Inferencer(BaseTrainer):
     """
@@ -26,6 +29,7 @@ class Inferencer(BaseTrainer):
         dataloaders,
         save_path,
         metrics=None,
+        writer=None,
         batch_transforms=None,
         skip_model_load=False,
     ):
@@ -64,7 +68,10 @@ class Inferencer(BaseTrainer):
         self.batch_transforms = batch_transforms
 
         # define dataloaders
-        self.evaluation_dataloaders = {k: v for k, v in dataloaders.items()}
+        # self.evaluation_dataloaders = {k: v for k, v in dataloaders.items()}
+        self.evaluation_dataloaders = {
+            k: v for k, v in dataloaders.items() if k != "train"
+        }
 
         # path definition
 
@@ -80,6 +87,7 @@ class Inferencer(BaseTrainer):
         else:
             self.evaluation_metrics = None
 
+        self.writer = writer
 
         if not skip_model_load:
             # init model
@@ -96,9 +104,14 @@ class Inferencer(BaseTrainer):
         """
         part_logs = {}
 
-        dataloader = self.evaluation_dataloaders["val"]
-        logs = self._inference_part("val", dataloader)
-        part_logs["val"] = logs
+        for part, dataloader in self.evaluation_dataloaders.items():
+            logs = self._inference_part(part, dataloader)
+            part_logs[part] = logs
+            # logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
+ 
+        # dataloader = self.evaluation_dataloaders["val"]
+        # logs = self._inference_part("val", dataloader)
+        # part_logs["val"] = logs
 
         return part_logs
 
@@ -165,7 +178,6 @@ class Inferencer(BaseTrainer):
         if self.save_path is not None:
             (self.save_path / part).mkdir(exist_ok=True, parents=True)
 
-
         pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
             'stabilityai/stable-diffusion-xl-base-1.0', #'SG161222/RealVisXL_V3.0',  
             torch_dtype=torch.float16, 
@@ -194,6 +206,46 @@ class Inferencer(BaseTrainer):
                     metrics=self.evaluation_metrics,
                     part=part
                 )
+                self._log_batch(
+                    batch_idx, batch, part
+                ) 
+            self._log_scalars(self.evaluation_metrics, part=f'{part}/')
 
         return self.evaluation_metrics.result()
+    
+    def _log_batch(self, batch_idx, batch, mode="train"):
+        """
+        Abstract method. Should be defined in the nested Trainer Class.
+
+        Log data from batch. Calls self.writer.add_* to log data
+        to the experiment tracker.
+
+        Args:
+            batch_idx (int): index of the current batch.
+            batch (dict): dict-based batch after going through
+                the 'process_batch' function.
+            mode (str): train or inference. Defines which logging
+                rules to apply.
+        """
+        # method to log data from you batch
+        # such as audio, text or images, for example
+
+        # logging scheme might be different for different partitions
+        if mode == "train":  # the method is called only every self.log_step steps
+            # Log Stuff
+            pass
+        else:
+            # Log Stuff
+            prompt = batch['prompt']
+            ref_num = len(batch['ref_images'])
+            assert len(batch['ref_images']) == 1, len(batch['ref_images'])
+
+            ref_img = batch['ref_images'][0]
+            generated_img = batch['generated'][0]
+
+            image_arrays = [np.array(ref_img.resize((256, 256))), np.array(generated_img.resize((256, 256)))]
+            concated_image = Image.fromarray(np.concatenate(image_arrays, axis=1))
+
+            image_name = f"{mode}_images/{batch['id']}/{batch['image_name']}/{prompt[:30]}..."
+            self.writer.add_image(image_name, concated_image)
 

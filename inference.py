@@ -6,8 +6,11 @@ from hydra.utils import instantiate
 
 from src.datasets.data_utils import get_dataloaders
 from src.trainer import Inferencer
-from src.utils.init_utils import set_random_seed
+from src.utils.init_utils import set_random_seed, setup_saving_and_logging
 from src.utils.io_utils import ROOT_PATH
+
+from omegaconf import OmegaConf
+
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -28,6 +31,10 @@ def main(config):
         device = "cuda" if torch.cuda.is_available() else "cpu"
     else:
         device = config.inferencer.device
+
+    project_config = OmegaConf.to_container(config)
+    # logger = setup_saving_and_logging(config)
+    writer = instantiate(config.writer, None, project_config)
 
     # setup data_loader instances
     # batch_transforms should be put on device
@@ -51,6 +58,7 @@ def main(config):
         batch_transforms=batch_transforms,
         save_path=save_path,
         metrics=metrics,
+        writer=writer,
         skip_model_load=False,
     )
 
@@ -60,7 +68,12 @@ def main(config):
         for key, value in logs[part].items():
             full_key = part + "_" + key
             print(f"    {full_key:15s}: {value}")
-
+    
+    with open(f'{save_path}/metrics.txt', '+w') as f:
+        for part in logs.keys():
+            for key, value in logs[part].items():
+                full_key = part + "_" + key
+                f.write(f"    {full_key:15s}: {value}\n")
 
 if __name__ == "__main__":
     main()

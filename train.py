@@ -13,7 +13,6 @@ import itertools
 import os
 
 import subprocess
-from src.utils.init_utils import set_random_seed
 import datetime
 import torch.distributed
 
@@ -63,7 +62,7 @@ def main(config):
     # build model architecture, then print to console
     model = instantiate(config.model, device=device)
     print(device)
-    # logger.info(model)
+    logger.info(model)
 
     # get function handles of loss and metrics
     loss_function = instantiate(config.loss_function).to(device)
