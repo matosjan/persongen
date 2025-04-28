@@ -1,13 +1,21 @@
 train:
   _target_: src.datasets.IDDataset
-  data_json_pth: filtered_ids3_beta.json
+  data_json_pth: filtered_ids3.json
   instance_transforms: ${transforms.instance_transforms.train}
   references_num: 4
 
 val:
   _target_: src.datasets.IDValDataset
-  data_json_pth: filtered_ids3_beta.json
+  data_json_pth: filtered_ids3.json
 
 ood_val:
   _target_: src.datasets.OODValDataset
-  data_json_pth: add_val_ids.json
+  data_json_pth: val_ids.json
+
+in_train_val:
+  _target_: src.datasets.InTrainValDataset
+  data_json_pth: val_ids.json
+
+out_of_train_val:
+  _target_: src.datasets.OutTrainValDataset
+  data_json_pth: val_ids.json

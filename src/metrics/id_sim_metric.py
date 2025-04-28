@@ -5,7 +5,7 @@ from src.id_utils.id_metric import IDMetric
 from src.id_utils.aligner import Aligner
 
 ID_EMBEDS_PTH = "id_embeds.pth"
-ID_EMBEDS_PTH_OOD = "add_val_id_embeds.pth"
+VAL_ID_EMBEDS_PTH = "val_id_embeds.pth"
 
 
 def cos_sim(arr1, arr2):
@@ -21,7 +21,7 @@ class IDSim(BaseMetric):
         self.aligner = Aligner()
         self.metric = IDMetric(device=device)
         self.id_embeds = torch.load(ID_EMBEDS_PTH)
-        self.id_embeds.update(torch.load(ID_EMBEDS_PTH_OOD))
+        self.id_embeds.update(torch.load(VAL_ID_EMBEDS_PTH))
 
     def __call__(self, **batch):
         generated_img_cropped, _, embeds = self.aligner(batch['generated'])

@@ -185,6 +185,7 @@ class PhotoMaker(nn.Module):
     
     def load_state_dict_(self, state_dict):
         self.id_encoder.load_state_dict(state_dict['id_encoder'])
+        print('loaded id encoder into model')
         lora_state_dict = state_dict['lora_weights']
         unet_state_dict = {f'{k.replace("unet.", "")}': v for k, v in lora_state_dict.items()}
         unet_state_dict = convert_unet_state_dict_to_peft(unet_state_dict)
@@ -198,6 +199,7 @@ class PhotoMaker(nn.Module):
                     f" {unexpected_keys}. "
                 )
                 assert 1 == 0
+        print('loaded lora into model')
 
     # time ids
     def compute_time_ids(self, original_size, crops_coords_top_left):
