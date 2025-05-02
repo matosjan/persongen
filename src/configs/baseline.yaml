@@ -28,7 +28,7 @@ loss_function:
 
 hyperparams:
   masked_loss_p: 0.5
-  do_cfg_p: 0
+  do_cfg_p: 0.1
 
 trainer:
   log_step: 50
