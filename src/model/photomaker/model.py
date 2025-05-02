@@ -40,6 +40,7 @@ from peft.utils import get_peft_model_state_dict
 from peft import LoraConfig, set_peft_model_state_dict
 from transformers import CLIPImageProcessor
 from src.model.photomaker.id_encoder import PhotoMakerIDEncoder
+from src.model.photomaker.orig_id_encoder import OrigPhotoMakerIDEncoder
 
 from diffusers.utils import (
     convert_state_dict_to_diffusers,
@@ -115,8 +116,9 @@ class PhotoMaker(nn.Module):
         )
 
         self.id_image_processor = CLIPImageProcessor()
-        self.id_encoder = PhotoMakerIDEncoder()
-        
+        # self.id_encoder = PhotoMakerIDEncoder()
+        self.id_encoder = OrigPhotoMakerIDEncoder()    
+
         self.num_tokens = 1
         self.tokenizer.add_tokens([self.trigger_word], special_tokens=True)
         self.tokenizer_2.add_tokens([self.trigger_word], special_tokens=True)
@@ -160,18 +162,19 @@ class PhotoMaker(nn.Module):
 
         self.unet.add_adapter(unet_lora_config)
 
-        # lora_params = 0
-        # for name, p in self.unet.named_parameters():
-        #     if p.requires_grad:
-        #         lora_params += 1
-        # print(f'Lora params {lora_params}')
+        lora_params = 0
+        for name, p in self.unet.named_parameters():
+            if p.requires_grad:
+                lora_params += 1
+                # print(p.shape)
+        print(f'Lora params {lora_params}')
 
-        # encoder_params = 0
-        # for name, p in self.id_encoder.named_parameters():
-        #     if p.requires_grad:
-        #         encoder_params += 1  
+        encoder_params = 0
+        for name, p in self.id_encoder.named_parameters():
+            if p.requires_grad:
+                encoder_params += 1  
         
-        # print(f'Encoder params {encoder_params}')
+        print(f'Encoder params {encoder_params}')
 
 
     def get_state_dict(self):
@@ -215,8 +218,6 @@ class PhotoMaker(nn.Module):
         model_input = self.vae.encode(pixel_values).latent_dist.sample()
         model_input = model_input * self.vae.config.scaling_factor
         
-        # print(model_input.shape)
-
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(model_input)
 
@@ -243,22 +244,20 @@ class PhotoMaker(nn.Module):
                 num_id_images=len(refs),
                 do_cfg=do_cfg,
             )
-            prompt_embeds_list.append(prompt_embeds)
             pooled_prompt_embeds_list.append(pooled_prompt_embeds)
             class_tokens_mask_list.append(class_tokens_mask)
+            #*********************************************************
+            if do_cfg == False:
+                id_pixel_values = self.id_image_processor(refs, return_tensors="pt").pixel_values.unsqueeze(0)
+                id_pixel_values = id_pixel_values.to(self.device, dtype=self.id_encoder.dtype)
+                prompt_embeds = prompt_embeds.to(dtype=self.id_encoder.dtype)
+                prompt_embeds = self.id_encoder(id_pixel_values, prompt_embeds, class_tokens_mask)
+            prompt_embeds_list.append(prompt_embeds)
 
         prompt_embeds = torch.concat(prompt_embeds_list, dim=0)
         pooled_prompt_embeds = torch.concat(pooled_prompt_embeds_list, dim=0)
-        if do_cfg == False:
-            class_tokens_mask = torch.concat(class_tokens_mask_list, dim=0)
-        #*********************************************************
-            all_ref_images_in_batch = list(itertools.chain.from_iterable(ref_images))
-            id_pixel_values = self.id_image_processor(all_ref_images_in_batch, return_tensors="pt").pixel_values.unsqueeze(0)
-            id_pixel_values = id_pixel_values.to(self.device, dtype=self.id_encoder.dtype)
-            #*********************************************************
-            prompt_embeds = prompt_embeds.to(dtype=self.id_encoder.dtype)
-            prompt_embeds = self.id_encoder(id_pixel_values, prompt_embeds, class_tokens_mask)
-        else:
+
+        if do_cfg == True:
             dummy = sum(p.sum() for p in self.id_encoder.parameters()) * 0
             prompt_embeds += dummy
 

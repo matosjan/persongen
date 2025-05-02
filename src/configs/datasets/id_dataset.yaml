@@ -2,7 +2,6 @@ train:
   _target_: src.datasets.IDDataset
   data_json_pth: filtered_ids3.json
   instance_transforms: ${transforms.instance_transforms.train}
-  references_num: 4
 
 val:
   _target_: src.datasets.IDValDataset

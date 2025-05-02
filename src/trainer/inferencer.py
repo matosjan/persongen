@@ -142,6 +142,11 @@ class Inferencer(BaseTrainer):
             prompt=batch['prompt'],
             input_id_images=list(batch['ref_images']),
             generator=generator,
+            height=512,
+            width=512,
+            target_size=(512, 512),
+            original_size=(512, 512),
+            crops_coords_top_left=(0, 0),
              **self.config.validation_args
         ).images
 
@@ -179,10 +184,10 @@ class Inferencer(BaseTrainer):
             (self.save_path / part).mkdir(exist_ok=True, parents=True)
 
         pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
-            'stabilityai/stable-diffusion-xl-base-1.0', #'SG161222/RealVisXL_V3.0',  
+            self.config.model.pretrained_model_name_or_path, #'SG161222/RealVisXL_V3.0',  
             torch_dtype=torch.float16, 
             use_safetensors=True, 
-            variant="fp16"
+            # variant="fp16"
         )
         pipe.load_photomaker_adapter(
             self.model.get_state_dict(),

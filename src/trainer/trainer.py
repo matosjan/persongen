@@ -82,6 +82,9 @@ class Trainer(BaseTrainer):
             prompt=batch['prompt'],
             input_id_images=list(batch['ref_images']),
             generator=generator,
+            target_size=(512, 512),
+            original_size=(512, 512),
+            crops_coords_top_left=(0, 0),
             **self.config.validation_args
         ).images
 
@@ -91,8 +94,6 @@ class Trainer(BaseTrainer):
             metrics.update(met.name, met(**batch))
         return batch
         
-
-
     def _log_batch(self, batch_idx, batch, mode="train"):
         """
         Log data from batch. Calls self.writer.add_* to log data

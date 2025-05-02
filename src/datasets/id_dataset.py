@@ -16,6 +16,22 @@ Image.MAX_IMAGE_PIXELS = 933120000
 DATA_PREFIX = "/home/jovyan/shares/SR006.nfs2/free001style/final"
 OOD_DATA_PREFIX = "/home/jovyan/shares/SR006.nfs2/matos/persongen_main_version/data/additional_val"
 
+def get_crop_values(img_data, target_res=512):
+    H, W = img_data["orig_image_size"]
+    body_crop = img_data["body_crop"]
+    crop_size = body_crop[1] - body_crop[0]
+
+    coef = target_res / crop_size
+    new_H = H * coef
+    new_W = W * coef
+
+    new_body_crop = np.array(body_crop) * coef
+    new_body_crop = new_body_crop.astype(np.int64)
+
+    x1 = new_body_crop[0]
+    y1 = new_body_crop[2]
+    return y1, x1
+
 
 def get_bigger_crop(img, crop, scale=0.2):
     # to square crop 
@@ -45,42 +61,12 @@ def get_bigger_crop(img, crop, scale=0.2):
 
 
 class IDDataset(BaseDataset):
-    def __init__(self, data_json_pth=None, references_num=1, *args, **kwargs):
-        self.references_num = references_num
-
+    def __init__(self, data_json_pth=None, *args, **kwargs):
         with open(data_json_pth) as f:
             data_json = json.load(f)
 
-
-        # self.faces = {}
-        # self.images = {}
-        # self.sizes = {}
-
-        # index = []
-        # self.ids = []
-        # for k, v in tqdm(data_json.items()):
-        #     if k in ["ji_sung", "nm0001841"]: #["nm4139037", "nm2955013", "nm8402992"]:
-        #         # v.update({"img_path": "", "caption": ""})
-        #         index.append(v)
-        #         self.ids.append(k)
-        #         self.faces[k] = {}
-        #         self.images[k]  = {}
-        #         self.sizes[k]  = {}
-
-        #         for img_name in v.keys():
-        #             img = Image.open(f"{DATA_PREFIX}/{k}/{img_name}.jpg")
-        #             self.images[k][img_name] = img.resize((512, 512))
-        #             self.sizes[k][img_name] = img.size[0]
-
-        #             crop = v[img_name]['new_face_crop']
-        #             face_img = get_bigger_crop(img, crop=crop)
-        #             self.faces[k][img_name] = face_img
-
-
-        index = []
-        self.ids = []
-        for k, v in tqdm(data_json.items()):
-            if k not in ["ji_sung",
+        self.val_ids = [
+                        'ji_sung',
                         'nm0000609',
                         'nm0000334',
                         'bosco_ho',
@@ -91,7 +77,12 @@ class IDDataset(BaseDataset):
                         'nm0003683',
                         'nm0015865',
                         'nm0005452'
-                    ]:
+                        ]
+        
+        index = []
+        self.ids = []
+        for k, v in tqdm(data_json.items()):
+            if k not in self.val_ids:
                 index.append(v)
                 self.ids.append(k)
 
@@ -148,10 +139,10 @@ class IDDataset(BaseDataset):
                 crop = img_data['new_face_crop']
                 ref_images.append(get_bigger_crop(img, crop=crop))
 
-
-        instance_data["ref_images"] = ref_images
-        instance_data["original_sizes"] = (512, 512)
-        instance_data["crop_top_lefts"] = (0, 0)
+        instance_data['ref_images'] = ref_images
+        orig_size = img_data["orig_image_size"]
+        instance_data["original_sizes"] = (orig_size[1], orig_size[0])
+        instance_data["crop_top_lefts"] = get_crop_values(img_data)
 
         instance_data = self.preprocess_data(instance_data)
 
@@ -218,8 +209,6 @@ class IDValDataset(BaseDataset):
         face_img = get_bigger_crop(img, crop=crop)
 
         instance_data["ref_images"] = [face_img] 
-        instance_data["original_sizes"] = (512, 512)
-        instance_data["crop_top_lefts"] = (0, 0)
 
         instance_data = self.preprocess_data(instance_data)
         instance_data["id"] = id
@@ -291,8 +280,6 @@ class OODValDataset(BaseDataset):
         face_img = get_bigger_crop(img, crop=crop)
 
         instance_data["ref_images"] = [face_img] 
-        instance_data["original_sizes"] = (512, 512)
-        instance_data["crop_top_lefts"] = (0, 0)
 
         instance_data = self.preprocess_data(instance_data)
         instance_data["id"] = id
@@ -367,8 +354,6 @@ class InTrainValDataset(BaseDataset):
         face_img = get_bigger_crop(img, crop=crop)
 
         instance_data["ref_images"] = [face_img] 
-        instance_data["original_sizes"] = (512, 512)
-        instance_data["crop_top_lefts"] = (0, 0)
 
         instance_data = self.preprocess_data(instance_data)
         instance_data["id"] = id
@@ -443,9 +428,7 @@ class OutTrainValDataset(BaseDataset):
         crop = img_dict['new_face_crop']
         face_img = get_bigger_crop(img, crop=crop)
 
-        instance_data["ref_images"] = [face_img] 
-        instance_data["original_sizes"] = (512, 512)
-        instance_data["crop_top_lefts"] = (0, 0)
+        instance_data["ref_images"] = [face_img]
 
         instance_data = self.preprocess_data(instance_data)
         instance_data["id"] = id

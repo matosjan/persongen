@@ -34,7 +34,7 @@ def main(config):
     Args:
         config (DictConfig): hydra experiment config.
     """
-    torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=3600))
+    # torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=3600))
     set_random_seed(config.trainer.seed)
     print(config.model.rank)
     print(os.getpid())
@@ -62,7 +62,8 @@ def main(config):
     # build model architecture, then print to console
     model = instantiate(config.model, device=device)
     print(device)
-    logger.info(model)
+    # if accelerator.is_main_process:
+        # logger.info(model)
 
     # get function handles of loss and metrics
     loss_function = instantiate(config.loss_function).to(device)
@@ -77,15 +78,27 @@ def main(config):
     lora_params = filter(lambda p: p.requires_grad, model.unet.parameters())
     other_params =  filter(lambda p: p.requires_grad, model.id_encoder.parameters())
     # visual_projection_params = filter(lambda p: p.requires_grad, model.id_encoder.visual_projection.parameters())
+    # vision_backbone_params = filter(lambda p: p.requires_grad, itertools.chain(model.id_encoder.vision_model.parameters(), model.id_encoder.visual_projection.parameters()))
     # visual_projection_2_and_fuse_params = filter(lambda p: p.requires_grad, itertools.chain(model.id_encoder.visual_projection_2.parameters(), model.id_encoder.fuse_module.parameters()))
     trainable_params = [
         {'params': lora_params, 'lr': config.lr_for_lora},
         {'params': other_params, 'lr': config.lr_for_other}
+        # {'params': vision_backbone_params, 'lr': config.lr_for_vision_backbone},
         # {'params': visual_projection_params, 'lr': config.lr_for_vis_proj},
         # {'params': visual_projection_2_and_fuse_params, 'lr': config.lr_for_vis_proj2_and_fuse},
     ]
 
     optimizer = instantiate(config.optimizer, params=trainable_params)
+    if accelerator.is_main_process:
+        for i, group in enumerate(optimizer.param_groups):
+            print(f"Param group {i}:")
+            print(f"  learning rate: {group['lr']}")
+            print(f"  weight decay:  {group['weight_decay']}")
+            print(f"  betas:  {group['betas']}")
+            print(f"  eps:  {group['eps']}")
+
+            # list the names or number of params
+            print(f"  num params:    {len(group['params'])}")
 
     lr_scheduler = instantiate(config.lr_scheduler, optimizer=optimizer) 
 

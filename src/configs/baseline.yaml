@@ -11,10 +11,13 @@ defaults:
 optimizer:
   _convert_: partial
   _target_: torch.optim.Adam
+  # weight_decay: 1e-2
+
 lr_for_lora: 1e-5
-# lr_for_other: 1e-5
-lr_for_vis_proj: 1e-5
-lr_for_vis_proj2_and_fuse: 1e-4
+lr_for_other: 1e-5
+# lr_for_vis_proj: 1e-5
+# lr_for_vision_backbone: 1e-5
+# lr_for_vis_proj2_and_fuse: 1e-4
 
 lr_scheduler:
   _target_: torch.optim.lr_scheduler.ConstantLR # не сохраняю state_dict
@@ -25,7 +28,7 @@ loss_function:
 
 hyperparams:
   masked_loss_p: 0.5
-  do_cfg_p: 0.1
+  do_cfg_p: 0
 
 trainer:
   log_step: 50
@@ -48,5 +51,7 @@ validation_args:
   num_inference_steps: 50
   start_merge_step: 10
   guidance_scale: 5
+  height: 512
+  width: 512
 
 

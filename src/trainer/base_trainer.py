@@ -139,7 +139,7 @@ class BaseTrainer:
 
         # define metrics
         self.metrics = metrics
-        train_metrics_names = [m for m in self.config.writer.loss_names] + ["total_grad_norm", "unet_grad_norm", "id_enc_grad_norm", "vis_proj_grad_norm", "vis_proj2_fuse_grad_norm"] + [m.name for m in self.metrics["train"]]
+        train_metrics_names = [m for m in self.config.writer.loss_names] + ["total_grad_norm", "unet_grad_norm", "id_enc_grad_norm", "vis_backbone_grad_norm", "vis_proj_grad_norm", "vis_proj2_fuse_grad_norm"] + [m.name for m in self.metrics["train"]]
         self.train_metrics = MetricTracker(
             *train_metrics_names,
             writer=self.writer,
@@ -164,11 +164,12 @@ class BaseTrainer:
             self._from_pretrained(config.trainer.get("from_pretrained"))
 
         if self.accelerator.is_main_process:
+            print(self.config.model.pretrained_model_name_or_path)
             self.pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
-                'stabilityai/stable-diffusion-xl-base-1.0', #'SG161222/RealVisXL_V3.0',  
+                self.config.model.pretrained_model_name_or_path, #'SG161222/RealVisXL_V3.0',  
                 torch_dtype=torch.float16, 
                 use_safetensors=True, 
-                variant="fp16"
+                # variant="fp16"
             )
 
     def train(self):
@@ -257,19 +258,24 @@ class BaseTrainer:
                     batch,
                     metrics=self.train_metrics,
                 )
-            except torch.cuda.OutOfMemoryError as e:
+            except torch.cuda.OutOfMemoryError as oom_e:
                 if self.skip_oom:
+                    print(pid, "OOM on batch. Skipping batch.")
                     if self.accelerator.is_main_process:
                         self.logger.warning("OOM on batch. Skipping batch.")
                     torch.cuda.empty_cache()  # free some memory
                     continue
                 else:
-                    raise e
+                    raise oom_e
+            except RuntimeError as e:
+                print(pid, "Runtimer Error on batch: ", batch)
+                raise RuntimeError("Runtime Error")
 
-            total_norm, unet_norm, id_encoder_norm, vis_proj_norm, vis_proj_2_and_fuse_norm = self._get_grad_norm()
+            total_norm, unet_norm, id_encoder_norm, vis_backbone_norm, vis_proj_norm, vis_proj_2_and_fuse_norm = self._get_grad_norm()
             self.train_metrics.update("total_grad_norm", total_norm)
             self.train_metrics.update("unet_grad_norm", unet_norm)
             self.train_metrics.update("id_enc_grad_norm", id_encoder_norm)
+            self.train_metrics.update("vis_backbone_grad_norm", vis_backbone_norm)
             self.train_metrics.update("vis_proj_grad_norm", vis_proj_norm)
             self.train_metrics.update("vis_proj2_fuse_grad_norm", vis_proj_2_and_fuse_norm)
             
@@ -290,8 +296,13 @@ class BaseTrainer:
                     )
 
                     # self.writer.add_scalar(
+                    #     "general/lr for vis_backbone", self.lr_scheduler.get_last_lr()[0]
+                    # )
+
+                    # self.writer.add_scalar(
                     #     "general/lr for vis_proj", self.lr_scheduler.get_last_lr()[1]
                     # )
+
                     # self.writer.add_scalar(
                     #     "general/lr for vis_proj2 and fuse", self.lr_scheduler.get_last_lr()[2]
                     # )
@@ -489,6 +500,7 @@ class BaseTrainer:
         # Compute individual norms
         unet_norm = compute_module_grad_norm(unet)
         id_encoder_norm = compute_module_grad_norm(id_encoder)
+        vis_backbone_norm = compute_module_grad_norm(id_encoder.vision_model)
         vis_proj_norm = compute_module_grad_norm(id_encoder.visual_projection)
         vis_proj_2_norm = compute_module_grad_norm(id_encoder.visual_projection_2)
         fuse_module_norm = compute_module_grad_norm(id_encoder.fuse_module)
@@ -497,7 +509,7 @@ class BaseTrainer:
         total_norm = torch.norm(torch.tensor([unet_norm, id_encoder_norm]), norm_type).item()
         vis_proj_2_and_fuse_norm = torch.norm(torch.tensor([vis_proj_2_norm, fuse_module_norm]), norm_type).item()
 
-        return total_norm, unet_norm, id_encoder_norm, vis_proj_norm, vis_proj_2_and_fuse_norm
+        return total_norm, unet_norm, id_encoder_norm, vis_backbone_norm, vis_proj_norm, vis_proj_2_and_fuse_norm
 
     def _progress(self, batch_idx):
         """
@@ -574,13 +586,15 @@ class BaseTrainer:
             torch.save(state, filename)
             if self.config.writer.log_checkpoints:
                 self.writer.add_checkpoint(filename, str(self.checkpoint_dir.parent))
-            self.logger.info(f"Saving checkpoint: {filename} ...")
+            if self.accelerator.is_main_process:
+                self.logger.info(f"Saving checkpoint: {filename} ...")
         if save_best:
             best_path = str(self.checkpoint_dir / "model_best.pth")
             torch.save(state, best_path)
             if self.config.writer.log_checkpoints:
                 self.writer.add_checkpoint(best_path, str(self.checkpoint_dir.parent))
-            self.logger.info("Saving current best: model_best.pth ...")
+            if self.accelerator.is_main_process:
+                self.logger.info("Saving current best: model_best.pth ...")
 
     def _resume_checkpoint(self, resume_path):
         """
@@ -649,6 +663,12 @@ class BaseTrainer:
         checkpoint = torch.load(pretrained_path, self.device)
 
         if checkpoint.get("state_dict") is not None:
-            self.model.load_state_dict_(checkpoint["state_dict"])
+            if hasattr(self, 'accelerator'):
+                self.accelerator.unwrap_model(self.model).load_state_dict_(checkpoint["state_dict"])
+            else:
+                self.model.load_state_dict_(checkpoint["state_dict"])
         else:
-            self.accelerator.unwrap_model(self.model).load_state_dict_(checkpoint)
+            if hasattr(self, 'accelerator'):
+                self.accelerator.unwrap_model(self.model).load_state_dict_(checkpoint)
+            else:
+                self.model.load_state_dict_(checkpoint)
