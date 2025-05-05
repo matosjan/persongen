@@ -15,13 +15,20 @@ optimizer:
 
 lr_for_lora: 1e-5
 lr_for_other: 1e-5
+# lr_for_lora_and_heads: 1e-5
 # lr_for_vis_proj: 1e-5
 # lr_for_vision_backbone: 1e-5
-# lr_for_vis_proj2_and_fuse: 1e-4
+# lr_for_vis_proj2_and_fuse: 1e-5
+
+# lr_warmup_steps: 1000
 
 lr_scheduler:
   _target_: torch.optim.lr_scheduler.ConstantLR # не сохраняю state_dict
   factor: 1
+
+# for warmup
+# lr_scheduler:
+#   _target_: torch.optim.lr_scheduler.LambdaLR # не сохраняю state_dict
 
 loss_function:
   _target_: src.loss.DiffusionLoss

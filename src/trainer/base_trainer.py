@@ -296,6 +296,10 @@ class BaseTrainer:
                     )
 
                     # self.writer.add_scalar(
+                    #     "general/lr for lora and enc heads", self.lr_scheduler.get_last_lr()[0]
+                    # )
+
+                    # self.writer.add_scalar(
                     #     "general/lr for vis_backbone", self.lr_scheduler.get_last_lr()[0]
                     # )
 

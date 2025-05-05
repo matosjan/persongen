@@ -34,7 +34,7 @@ def main(config):
     Args:
         config (DictConfig): hydra experiment config.
     """
-    # torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=3600))
+    torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=3600))
     set_random_seed(config.trainer.seed)
     print(config.model.rank)
     print(os.getpid())
@@ -77,12 +77,15 @@ def main(config):
     # build optimizer, learning rate scheduler
     lora_params = filter(lambda p: p.requires_grad, model.unet.parameters())
     other_params =  filter(lambda p: p.requires_grad, model.id_encoder.parameters())
+
+    lora_and_two_heads_params = filter(lambda p: p.requires_grad, itertools.chain(model.unet.parameters(), model.id_encoder.visual_projection.parameters(), model.id_encoder.visual_projection_2.parameters(), model.id_encoder.fuse_module.parameters()))
     # visual_projection_params = filter(lambda p: p.requires_grad, model.id_encoder.visual_projection.parameters())
     # vision_backbone_params = filter(lambda p: p.requires_grad, itertools.chain(model.id_encoder.vision_model.parameters(), model.id_encoder.visual_projection.parameters()))
     # visual_projection_2_and_fuse_params = filter(lambda p: p.requires_grad, itertools.chain(model.id_encoder.visual_projection_2.parameters(), model.id_encoder.fuse_module.parameters()))
     trainable_params = [
         {'params': lora_params, 'lr': config.lr_for_lora},
-        {'params': other_params, 'lr': config.lr_for_other}
+        {'params': other_params, 'lr': config.lr_for_other},
+        # {'params': lora_and_two_heads_params, 'lr': config.lr_for_lora_and_heads}
         # {'params': vision_backbone_params, 'lr': config.lr_for_vision_backbone},
         # {'params': visual_projection_params, 'lr': config.lr_for_vis_proj},
         # {'params': visual_projection_2_and_fuse_params, 'lr': config.lr_for_vis_proj2_and_fuse},
@@ -101,6 +104,9 @@ def main(config):
             print(f"  num params:    {len(group['params'])}")
 
     lr_scheduler = instantiate(config.lr_scheduler, optimizer=optimizer) 
+    # with warmup
+    # lr_scheduler = instantiate(config.lr_scheduler, optimizer=optimizer, lr_lambda=lambda step: min((step + 1) / config.lr_warmup_steps, 1.0)) 
+
 
     # epoch_len = number of iterations for iteration-based training
     # epoch_len = None or len(dataloader) for epoch-based training

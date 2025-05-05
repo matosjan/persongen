@@ -56,7 +56,7 @@ else:
     XLA_AVAILABLE = False
 
 
-from src.model.photomaker.id_encoder import PhotoMakerIDEncoder # PhotoMaker v1)
+from src.model.photomaker.orig_id_encoder import OrigPhotoMakerIDEncoder # PhotoMaker v1)
 
 PipelineImageInput = Union[
     PIL.Image.Image,
@@ -156,7 +156,7 @@ class OurPhotoMakerStableDiffusionXLPipelineOld(StableDiffusionXLPipeline):
         # load finetuned CLIP image encoder and fuse module here if it has not been registered to the pipeline yet
         self.id_image_processor = CLIPImageProcessor()
         if pm_version == "v1": # PhotoMaker v1 
-            id_encoder = PhotoMakerIDEncoder()
+            id_encoder = OrigPhotoMakerIDEncoder()
         # elif pm_version == "v2": # PhotoMaker v2
             # id_encoder = PhotoMakerIDEncoder_CLIPInsightfaceExtendtoken()
         else:
