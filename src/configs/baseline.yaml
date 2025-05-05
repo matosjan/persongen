@@ -13,7 +13,7 @@ optimizer:
   _target_: torch.optim.Adam
   # weight_decay: 1e-2
 
-lr_for_lora: 1e-5
+lr_for_lora: 1e-4
 lr_for_other: 1e-5
 # lr_for_lora_and_heads: 1e-5
 # lr_for_vis_proj: 1e-5
