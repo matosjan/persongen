@@ -38,6 +38,7 @@ class BaseTrainer:
     def __init__(
         self,
         model,
+        pipe,
         accelerator,
         criterion,
         metrics,
@@ -88,6 +89,7 @@ class BaseTrainer:
         self.log_step = config.trainer.get("log_step", 50)
 
         self.model = model
+        self.pipe = pipe
         self.accelerator = accelerator
         self.criterion = criterion
         self.optimizer = optimizer
@@ -139,7 +141,7 @@ class BaseTrainer:
 
         # define metrics
         self.metrics = metrics
-        train_metrics_names = [m for m in self.config.writer.loss_names] + ["total_grad_norm", "unet_grad_norm", "id_enc_grad_norm", "vis_backbone_grad_norm", "vis_proj_grad_norm", "vis_proj2_fuse_grad_norm"] + [m.name for m in self.metrics["train"]]
+        train_metrics_names = [m for m in self.config.writer.loss_names] + ["total_grad_norm", "unet_grad_norm", "id_enc_grad_norm", "vis_backbone_grad_norm", "vis_proj_grad_norm", "vis_proj_2_grad_norm", "vis_proj_3_grad_norm", "fuse_module_grad_norm"] + [m.name for m in self.metrics["train"]]
         self.train_metrics = MetricTracker(
             *train_metrics_names,
             writer=self.writer,
@@ -163,14 +165,6 @@ class BaseTrainer:
         if config.trainer.get("from_pretrained") is not None:
             self._from_pretrained(config.trainer.get("from_pretrained"))
 
-        if self.accelerator.is_main_process:
-            print(self.config.model.pretrained_model_name_or_path)
-            self.pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
-                self.config.model.pretrained_model_name_or_path, #'SG161222/RealVisXL_V3.0',  
-                torch_dtype=torch.float16, 
-                use_safetensors=True, 
-                # variant="fp16"
-            )
 
     def train(self):
         """
@@ -239,13 +233,14 @@ class BaseTrainer:
             self.writer.set_step((epoch - 1) * self.epoch_len)
             self.writer.add_scalar("general/epoch", epoch)
 
-        if epoch == 1 and self.accelerator.is_main_process:
-            for part, dataloader in self.evaluation_dataloaders.items():
-                self.pipe.unfuse_lora()
-                self.pipe.delete_adapters("photomaker")
-                val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
-                logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
-            self.is_train = True
+        # if epoch == 1 and self.accelerator.is_main_process:
+        #     for part, dataloader in self.evaluation_dataloaders.items():
+        #         if isinstance(self.pipe, PhotoMakerStableDiffusionXLPipeline):
+        #             self.pipe.unfuse_lora()
+        #             self.pipe.delete_adapters("photomaker")
+        #         val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
+        #         logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
+        #     self.is_train = True
         
         set_random_seed(self.config.trainer.seed + epoch)
 
@@ -271,13 +266,15 @@ class BaseTrainer:
                 print(pid, "Runtimer Error on batch: ", batch)
                 raise RuntimeError("Runtime Error")
 
-            total_norm, unet_norm, id_encoder_norm, vis_backbone_norm, vis_proj_norm, vis_proj_2_and_fuse_norm = self._get_grad_norm()
+            total_norm, unet_norm, id_encoder_norm, vis_backbone_norm, vis_proj_norm, vis_proj_2_norm, vis_proj_3_norm, fuse_module_norm = self._get_grad_norm()
             self.train_metrics.update("total_grad_norm", total_norm)
             self.train_metrics.update("unet_grad_norm", unet_norm)
             self.train_metrics.update("id_enc_grad_norm", id_encoder_norm)
             self.train_metrics.update("vis_backbone_grad_norm", vis_backbone_norm)
             self.train_metrics.update("vis_proj_grad_norm", vis_proj_norm)
-            self.train_metrics.update("vis_proj2_fuse_grad_norm", vis_proj_2_and_fuse_norm)
+            self.train_metrics.update("vis_proj_2_grad_norm", vis_proj_2_norm)
+            self.train_metrics.update("vis_proj_3_grad_norm", vis_proj_3_norm)
+            self.train_metrics.update("fuse_module_grad_norm", fuse_module_norm)
             
             # log current results
             if batch_idx % self.log_step == 0:
@@ -288,12 +285,22 @@ class BaseTrainer:
                             epoch, self._progress(batch_idx), batch["loss"].item()
                         )
                     )
-                    self.writer.add_scalar(
-                        "general/lr for lora layers", self.lr_scheduler.get_last_lr()[0]
-                    )
-                    self.writer.add_scalar(
-                        "general/lr for other modules", self.lr_scheduler.get_last_lr()[1]
-                    )
+
+                    for group in self.optimizer.param_groups:
+                        self.writer.add_scalar(
+                            f"general/lr for {group['name']}", group['lr']
+                        )
+
+                    # self.writer.add_scalar(
+                    #     "general/lr for lora layers", self.lr_scheduler.get_last_lr()[0]
+                    # )
+                    # self.writer.add_scalar(
+                    #     "general/lr for other modules", self.lr_scheduler.get_last_lr()[1]
+                    # )
+
+                    # self.writer.add_scalar(
+                    #     "general/lr for adapter_modules", self.lr_scheduler.get_last_lr()[1]
+                    # )
 
                     # self.writer.add_scalar(
                     #     "general/lr for lora and enc heads", self.lr_scheduler.get_last_lr()[0]
@@ -325,8 +332,9 @@ class BaseTrainer:
         # Run val/test
         if self.accelerator.is_main_process:
             for part, dataloader in self.evaluation_dataloaders.items():
-                self.pipe.unfuse_lora()
-                self.pipe.delete_adapters("photomaker")
+                if isinstance(self.pipe, PhotoMakerStableDiffusionXLPipeline):
+                    self.pipe.unfuse_lora()
+                    self.pipe.delete_adapters("photomaker")
                 val_logs = self._evaluation_epoch(epoch, part, dataloader)
                 logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
 
@@ -355,7 +363,8 @@ class BaseTrainer:
         )
 
         self.pipe.scheduler = EulerDiscreteScheduler.from_config(self.pipe.scheduler.config)
-        self.pipe.fuse_lora()
+        if isinstance(self.pipe, PhotoMakerStableDiffusionXLPipeline):
+            self.pipe.fuse_lora()
 
         self.writer.set_step(epoch * self.epoch_len, part)
         with torch.no_grad():
@@ -493,6 +502,7 @@ class BaseTrainer:
         model = self.accelerator.unwrap_model(self.model)
         unet = model.unet
         id_encoder = model.id_encoder
+        adapter_modules = model.adapter_modules if hasattr(model, 'adapter_modules') else None
 
         # Helper function to compute norm for a module
         def compute_module_grad_norm(module):
@@ -507,13 +517,28 @@ class BaseTrainer:
         vis_backbone_norm = compute_module_grad_norm(id_encoder.vision_model)
         vis_proj_norm = compute_module_grad_norm(id_encoder.visual_projection)
         vis_proj_2_norm = compute_module_grad_norm(id_encoder.visual_projection_2)
-        fuse_module_norm = compute_module_grad_norm(id_encoder.fuse_module)
+
+        if hasattr(id_encoder, 'visual_projection_3'):
+            vis_proj_3_norm = compute_module_grad_norm(id_encoder.visual_projection_3)
+        else:
+            vis_proj_3_norm = 0
+
+        if hasattr(id_encoder, 'fuse_module'):
+            fuse_module_norm = compute_module_grad_norm(id_encoder.fuse_module)
+        else:
+            fuse_module_norm = 0
+
+        if adapter_modules is not None:
+            adapter_modules_norm = compute_module_grad_norm(adapter_modules)
+        else:
+            adapter_modules_norm = 0
+
 
         # Compute total norm
-        total_norm = torch.norm(torch.tensor([unet_norm, id_encoder_norm]), norm_type).item()
-        vis_proj_2_and_fuse_norm = torch.norm(torch.tensor([vis_proj_2_norm, fuse_module_norm]), norm_type).item()
+        total_norm = torch.norm(torch.tensor([unet_norm, id_encoder_norm, adapter_modules_norm]), norm_type).item()
+        # vis_proj_2_and_fuse_norm = torch.norm(torch.tensor([vis_proj_2_norm, fuse_module_norm]), norm_type).item()
 
-        return total_norm, unet_norm, id_encoder_norm, vis_backbone_norm, vis_proj_norm, vis_proj_2_and_fuse_norm
+        return total_norm, unet_norm, id_encoder_norm, vis_backbone_norm, vis_proj_norm, vis_proj_2_norm, vis_proj_3_norm, fuse_module_norm
 
     def _progress(self, batch_idx):
         """

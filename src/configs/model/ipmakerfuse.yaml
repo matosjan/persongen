@@ -1,0 +1,3 @@
+_target_: src.model.IPMakerFuse
+pretrained_model_name_or_path: 'hotshotco/SDXL-512'
+weight_dtype: fp16
