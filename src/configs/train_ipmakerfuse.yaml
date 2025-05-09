@@ -13,12 +13,12 @@ optimizer:
   _target_: torch.optim.Adam
   # weight_decay: 1e-2
 
-lr_for_adapter_modules: 1e-4
+lr_for_adapter_modules: 1e-5
 lr_for_vis_proj: 1e-5
-lr_for_vis_proj_2: 1e-4
-lr_for_fuse_module: 1e-4
-lr_for_vis_proj_3: 1e-4
-lr_for_id_layer_norm: 1e-4
+lr_for_vis_proj_2: 1e-5
+lr_for_fuse_module: 1e-5
+lr_for_vis_proj_3: 1e-5
+lr_for_id_layer_norm: 1e-5
 
 lr_warmup_steps: 1000
 
@@ -47,7 +47,7 @@ trainer:
   device: auto # device name or "auto"
   override: True # if True, will override the previous run with the same name
   monitor: "max val_id_sim" #"max test_MulticlassAccuracy" # "off" or "max/min metric_name", i.e. our goal is to maximize/minimize metric
-  save_period: 1 # checkpoint each save_period epochs in addition to the best epoch
+  save_period: 2 # checkpoint each save_period epochs in addition to the best epoch
   early_stop: ${trainer.n_epochs} # epochs for early stopping
   save_dir: "saved"
   seed: 0

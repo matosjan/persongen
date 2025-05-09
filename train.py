@@ -35,7 +35,7 @@ def main(config):
     Args:
         config (DictConfig): hydra experiment config.
     """
-    # torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=3600))
+    torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=3600))
     set_random_seed(config.trainer.seed)
     print(config.model.rank)
     print(os.getpid())
@@ -77,18 +77,18 @@ def main(config):
 
     # build optimizer, learning rate scheduler
     lora_params = filter(lambda p: p.requires_grad, model.unet.parameters())
-    # visual_projection_params = filter(lambda p: p.requires_grad, model.id_encoder.visual_projection.parameters())
-    # visual_projection_2_params = filter(lambda p: p.requires_grad, model.id_encoder.visual_projection_2.parameters())
-    # fuse_module_params = filter(lambda p: p.requires_grad, model.id_encoder.fuse_module.parameters())
+    visual_projection_params = filter(lambda p: p.requires_grad, model.id_encoder.visual_projection.parameters())
+    visual_projection_2_params = filter(lambda p: p.requires_grad, model.id_encoder.visual_projection_2.parameters())
+    fuse_module_params = filter(lambda p: p.requires_grad, model.id_encoder.fuse_module.parameters())
     # other_params =  filter(lambda p: p.requires_grad, model.id_encoder.parameters())
-    id_encoder_params = filter(lambda p: p.requires_grad, model.id_encoder.parameters())
+    # id_encoder_params = filter(lambda p: p.requires_grad, model.id_encoder.parameters())
 
     trainable_params = [
         {'params': lora_params, 'lr': config.lr_for_lora, 'name': 'lora_params'},
-        # {'params': visual_projection_params, 'lr': config.lr_for_vis_proj, 'name': 'vis_proj_params'},
-        # {'params': visual_projection_2_params, 'lr': config.lr_for_vis_proj_2, 'name': 'vis_proj_2_params'},
-        # {'params': fuse_module_params, 'lr': config.lr_for_fuse_module, 'name': 'fuse_module_params'},
-        {'params': id_encoder_params, 'lr': config.lr_id_encoder, 'name': 'id_encoder_params'},
+        {'params': visual_projection_params, 'lr': config.lr_for_vis_proj, 'name': 'vis_proj_params'},
+        {'params': visual_projection_2_params, 'lr': config.lr_for_vis_proj_2, 'name': 'vis_proj_2_params'},
+        {'params': fuse_module_params, 'lr': config.lr_for_fuse_module, 'name': 'fuse_module_params'},
+        # {'params': id_encoder_params, 'lr': config.lr_id_encoder, 'name': 'id_encoder_params'},
     ]
 
     optimizer = instantiate(config.optimizer, params=trainable_params)
@@ -103,9 +103,9 @@ def main(config):
             # list the names or number of params
             print(f"  num params:    {len(group['params'])}")
 
-    lr_scheduler = instantiate(config.lr_scheduler, optimizer=optimizer) 
+    # lr_scheduler = instantiate(config.lr_scheduler, optimizer=optimizer) 
     # with warmup
-    # lr_scheduler = instantiate(config.lr_scheduler, optimizer=optimizer, lr_lambda=lambda step: min((step + 1) / config.lr_warmup_steps, 1.0)) 
+    lr_scheduler = instantiate(config.lr_scheduler, optimizer=optimizer, lr_lambda=lambda step: min((step + 1) / config.lr_warmup_steps, 1.0)) 
 
 
     # epoch_len = number of iterations for iteration-based training

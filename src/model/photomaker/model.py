@@ -130,19 +130,19 @@ class PhotoMaker(nn.Module):
         self.text_encoder.requires_grad_(False)
         self.text_encoder_2.requires_grad_(False)
         self.unet.requires_grad_(False)
-        self.id_encoder.requires_grad_(True)
-        # self.id_encoder.requires_grad_(False)
-        # # делаем обучаемым первый проекционный слой
-        # for param in self.id_encoder.visual_projection.parameters():
-        #     param.requires_grad = True
+        # self.id_encoder.requires_grad_(True)
+        self.id_encoder.requires_grad_(False)
+        # делаем обучаемым первый проекционный слой
+        for param in self.id_encoder.visual_projection.parameters():
+            param.requires_grad = True
 
-        # # делаем обучаемым второй проекционный слой
-        # for param in self.id_encoder.visual_projection_2.parameters():
-        #     param.requires_grad = True
+        # делаем обучаемым второй проекционный слой
+        for param in self.id_encoder.visual_projection_2.parameters():
+            param.requires_grad = True
 
-        # # делаем обучаемым весь FuseModule
-        # for param in self.id_encoder.fuse_module.parameters():
-        #     param.requires_grad = True
+        # делаем обучаемым весь FuseModule
+        for param in self.id_encoder.fuse_module.parameters():
+            param.requires_grad = True
 
 
         # Move unet, vae and text_encoder to device and cast to weight_dtype

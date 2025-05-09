@@ -8,6 +8,7 @@ from src.datasets.data_utils import get_dataloaders
 from src.trainer import Inferencer
 from src.utils.init_utils import set_random_seed, setup_saving_and_logging
 from src.utils.io_utils import ROOT_PATH
+from src.model.ip_adapter.pipeline_orig import IPMakerStableDiffusionXLPipeline
 
 from omegaconf import OmegaConf
 
@@ -50,8 +51,16 @@ def main(config):
     save_path = ROOT_PATH / "inference_results" / config.inferencer.save_path
     save_path.mkdir(exist_ok=True, parents=True)
 
+    pipe = IPMakerStableDiffusionXLPipeline.from_pretrained(
+                config.model.pretrained_model_name_or_path, #'SG161222/RealVisXL_V3.0',  
+                torch_dtype=torch.float16, 
+                use_safetensors=True, 
+                # variant="fp16"
+            )
+
     inferencer = Inferencer(
         model=model,
+        pipe=pipe,
         config=config,
         device=device,
         dataloaders=dataloaders,

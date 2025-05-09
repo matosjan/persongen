@@ -24,6 +24,7 @@ class Inferencer(BaseTrainer):
     def __init__(
         self,
         model,
+        pipe,
         config,
         device,
         dataloaders,
@@ -65,6 +66,7 @@ class Inferencer(BaseTrainer):
         self.device = device
 
         self.model = model
+        self.pipe = pipe
         self.batch_transforms = batch_transforms
 
         # define dataloaders
@@ -115,7 +117,7 @@ class Inferencer(BaseTrainer):
 
         return part_logs
 
-    def process_batch(self, batch_idx, batch, metrics, pipe, part):
+    def process_batch(self, batch_idx, batch, metrics, part):
         """
         Run batch through the model, compute metrics, and
         save predictions to disk.
@@ -138,7 +140,7 @@ class Inferencer(BaseTrainer):
         """
 
         generator = torch.Generator(device='cpu').manual_seed(42)
-        generated_images = pipe(
+        generated_images = self.pipe(
             prompt=batch['prompt'],
             input_id_images=list(batch['ref_images']),
             generator=generator,
@@ -183,20 +185,14 @@ class Inferencer(BaseTrainer):
         if self.save_path is not None:
             (self.save_path / part).mkdir(exist_ok=True, parents=True)
 
-        pipe = PhotoMakerStableDiffusionXLPipeline.from_pretrained(
-            self.config.model.pretrained_model_name_or_path, #'SG161222/RealVisXL_V3.0',  
-            torch_dtype=torch.float16, 
-            use_safetensors=True, 
-            # variant="fp16"
-        )
-        pipe.load_photomaker_adapter(
+        self.pipe.to(self.device)
+        self.pipe.load_photomaker_adapter(
             self.model.get_state_dict(),
             trigger_word="img"
         )
-        pipe.id_encoder.to(self.device)
-        pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
-        pipe.fuse_lora()
-        pipe.to(self.device)
+        self.pipe.scheduler = EulerDiscreteScheduler.from_config(self.pipe.scheduler.config)
+        if isinstance(self.pipe, PhotoMakerStableDiffusionXLPipeline):
+            self.pipe.fuse_lora()
 
         with torch.no_grad():
             for batch_idx, batch in tqdm(
@@ -207,7 +203,6 @@ class Inferencer(BaseTrainer):
                 batch = self.process_batch(
                     batch_idx=batch_idx,
                     batch=batch,
-                    pipe=pipe,
                     metrics=self.evaluation_metrics,
                     part=part
                 )

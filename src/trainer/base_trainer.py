@@ -233,14 +233,14 @@ class BaseTrainer:
             self.writer.set_step((epoch - 1) * self.epoch_len)
             self.writer.add_scalar("general/epoch", epoch)
 
-        # if epoch == 1 and self.accelerator.is_main_process:
-        #     for part, dataloader in self.evaluation_dataloaders.items():
-        #         if isinstance(self.pipe, PhotoMakerStableDiffusionXLPipeline):
-        #             self.pipe.unfuse_lora()
-        #             self.pipe.delete_adapters("photomaker")
-        #         val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
-        #         logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
-        #     self.is_train = True
+        if epoch == 1 and self.accelerator.is_main_process:
+            for part, dataloader in self.evaluation_dataloaders.items():
+                if isinstance(self.pipe, PhotoMakerStableDiffusionXLPipeline):
+                    self.pipe.unfuse_lora()
+                    self.pipe.delete_adapters("photomaker")
+                val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
+                logs.update(**{f"{part}_{name}": value for name, value in val_logs.items()})
+            self.is_train = True
         
         set_random_seed(self.config.trainer.seed + epoch)
 

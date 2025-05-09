@@ -36,7 +36,7 @@ def main(config):
     Args:
         config (DictConfig): hydra experiment config.
     """
-    # torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=3600))
+    torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=3600))
     set_random_seed(config.trainer.seed)
     print(os.getpid())
 
