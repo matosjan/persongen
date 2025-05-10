@@ -1,1 +1,1 @@
-from src.model.ip_adapter_fuse.model import IPMakerFuse
+from src.model.ipmakerbg.model import IPMakerBG

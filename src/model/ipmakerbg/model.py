@@ -146,10 +146,6 @@ class IPMakerBG(nn.Module):
         for param in self.id_encoder.fuse_module.parameters():
             param.requires_grad = True
         
-        # делаем обучаемым третий проекционный слой
-        for param in self.id_encoder.visual_projection_3.parameters():
-            param.requires_grad = True
-        
         # Move unet, vae and text_encoder to device and cast to weight_dtype
         # The VAE is in float32 to avoid NaN losses.
         self.unet.to(dtype=torch.float32)
@@ -166,6 +162,7 @@ class IPMakerBG(nn.Module):
         )
 
         self.unet.add_adapter(unet_lora_config)
+        # print(self.unet.state_dict().keys())
         loras = []
         for name, module in self.unet.named_modules():
             # assume that all LoRA layers have 'lora' in their name
@@ -191,8 +188,8 @@ class IPMakerBG(nn.Module):
             else:
                 layer_name = name.split(".processor")[0]
                 weights = {
-                    "to_k_ip.weight": unet_sd[layer_name + ".to_k.weight"],
-                    "to_v_ip.weight": unet_sd[layer_name + ".to_v.weight"],
+                    "to_k_ip.weight": unet_sd[layer_name + ".to_k.base_layer.weight"],
+                    "to_v_ip.weight": unet_sd[layer_name + ".to_v.base_layer.weight"],
                 }
                 attn_procs[name] = IPAttnProcessor(hidden_size=hidden_size, cross_attention_dim=cross_attention_dim, num_tokens=self.num_text_tokens)
                 attn_procs[name].load_state_dict(weights)
@@ -327,7 +324,7 @@ class IPMakerBG(nn.Module):
 
         prompt_embeds = torch.concat(prompt_embeds_list, dim=0)
         pooled_prompt_embeds = torch.concat(pooled_prompt_embeds_list, dim=0)
-        prompt_bg_embeds = torch.concat(prompt_bg_embeds, dim=0)
+        prompt_bg_embeds = torch.concat(prompt_bg_embeds_list, dim=0)
         
         if do_cfg is True:
             dummy = sum(p.sum() for p in self.id_encoder.parameters()) * 0

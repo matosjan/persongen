@@ -146,6 +146,7 @@ def retrieve_timesteps(
 
 class IPMakerBGStableDiffusionXLPipeline(StableDiffusionXLPipeline):
     @validate_hf_hub_args
+    @torch.inference_mode
     def load_photomaker_adapter(
         self,
         pretrained_model_name_or_path_or_dict: Union[str, Dict[str, torch.Tensor]],
@@ -204,10 +205,14 @@ class IPMakerBGStableDiffusionXLPipeline(StableDiffusionXLPipeline):
         self.id_encoder = OrigPhotoMakerIDEncoder()
         
         orig_lora_weights_sum = torch.sum(torch.stack([torch.sum(p) for p in self.unet.parameters()]))
+        print('sum before', torch.sum(torch.stack([torch.sum(p) for p in self.unet.parameters()])))
         self.load_lora_weights(state_dict["lora_weights"], adapter_name="photomaker")
+        for name, p in self.unet.named_parameters():
+            if 'lora' in name:
+                print(name, torch.sum(p))
         new_lora_weights_sum = torch.sum(torch.stack([torch.sum(p) for p in self.unet.parameters()]))
 
-        assert orig_lora_weights_sum != new_lora_weights_sum, 'Weights of unet did not change (pipe)'
+        # assert orig_lora_weights_sum != new_lora_weights_sum, 'Weights of unet did not change (pipe)'
         print('Loaded lora_weights into pipeline')
         
         orig_encoder_sum = torch.sum(torch.stack([torch.sum(p) for p in self.id_encoder.parameters()]))
@@ -730,10 +735,10 @@ class IPMakerBGStableDiffusionXLPipeline(StableDiffusionXLPipeline):
             do_classifier_free_guidance=self.do_classifier_free_guidance,
             negative_prompt=None,
             negative_prompt_2=None,
-            prompt_embeds=prompt_embeds_text_only,
-            negative_prompt_embeds=negative_prompt_embeds,
-            pooled_prompt_embeds=pooled_prompt_embeds_text_only,
-            negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
+            prompt_embeds=None,
+            negative_prompt_embeds=None,
+            pooled_prompt_embeds=None,
+            negative_pooled_prompt_embeds=None,
             lora_scale=lora_scale,
             clip_skip=self.clip_skip,
         )

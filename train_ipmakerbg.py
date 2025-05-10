@@ -26,7 +26,7 @@ def get_nvidia_smi_output():
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
-@hydra.main(version_base=None, config_path="src/configs", config_name="train_ipmakerfuse")
+@hydra.main(version_base=None, config_path="src/configs", config_name="train_ipmakerbg")
 def main(config):
     """
     Main script for training. Instantiates the model, optimizer, scheduler,
