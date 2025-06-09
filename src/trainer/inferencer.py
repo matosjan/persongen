@@ -177,7 +177,8 @@ class Inferencer(BaseTrainer):
         Returns:
             logs (dict): metrics, calculated on the partition.
         """
-
+        self.pipe.unfuse_lora()
+        self.pipe.delete_adapters("photomaker")
         self.is_train = False
         self.evaluation_metrics.reset()
 
@@ -191,8 +192,8 @@ class Inferencer(BaseTrainer):
             trigger_word="img"
         )
         self.pipe.scheduler = EulerDiscreteScheduler.from_config(self.pipe.scheduler.config)
-        if isinstance(self.pipe, PhotoMakerStableDiffusionXLPipeline):
-            self.pipe.fuse_lora()
+        # if isinstance(self.pipe, PhotoMakerStableDiffusionXLPipeline):
+        self.pipe.fuse_lora()
 
         with torch.no_grad():
             for batch_idx, batch in tqdm(

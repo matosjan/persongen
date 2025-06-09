@@ -178,14 +178,7 @@ class IDValDataset(BaseDataset):
             "nm0001841" : ["2", "27"]
         }
 
-        captions = [
-        "Photo of a person img looking into the camera, wearing a black cloak and red hat. Daytime, 3 mountains in the background, a medieval castle can be seen on the far right mountain",
-        """A photo of an angry businessman img in a yellow suit, talking on the phone and looking into the camera. He is in the street of a big city: to the left behind him is a bank building with a big sign above it saying "Neon Bank".""",
-        # "A 2d cartoon-style photo of a small but very muscular dwarf img with a long red beard looking into the camera. He has a naked top and is holding a massive battleaxe in his left hand. He is in a tavern, with many tables behind him and a bar with a barman.",
-        " A photo of a man img in a space suit, his face is seen very surprised, he is in the desert near Oathis with lake, palm trees and a couple of camels behind him.",
-        # "A photo of man img with blue hair , looking at the viewer, dressed in a red clown suit and clown make-up seated on a bench with a windmill far behind him.",
-        "A photo of a middle-aged man img in a dark green sweater looking at the viewer, he is in a room with white walls, there is a portrait behind him and a books on a shelf."
-        ]
+        captions = BASIC_CAPTIONS
 
         index = []
         for id, id_data in ids_json.items():
@@ -249,14 +242,7 @@ class OODValDataset(BaseDataset):
             'vetrov'
         ]
 
-        captions = [
-        "Photo of a person img looking into the camera, wearing a black cloak and red hat. Daytime, 3 mountains in the background, a medieval castle can be seen on the far right mountain",
-        """A photo of an angry businessman img in a yellow suit, talking on the phone and looking into the camera. He is in the street of a big city: to the left behind him is a bank building with a big sign above it saying "Neon Bank".""",
-        # "A 2d cartoon-style photo of a small but very muscular dwarf img with a long red beard looking into the camera. He has a naked top and is holding a massive battleaxe in his left hand. He is in a tavern, with many tables behind him and a bar with a barman.",
-        " A photo of a man img in a space suit, his face is seen very surprised, he is in the desert near Oathis with lake, palm trees and a couple of camels behind him.",
-        # "A photo of man img with blue hair , looking at the viewer, dressed in a red clown suit and clown make-up seated on a bench with a windmill far behind him.",
-        "A photo of a middle-aged man img in a dark green sweater looking at the viewer, he is in a room with white walls, there is a portrait behind him and a books on a shelf."
-        ]
+        captions = BASIC_CAPTIONS
 
         index = []
         for id in self.ids:
@@ -323,14 +309,7 @@ class InTrainValDataset(BaseDataset):
             'nm0005151'
         ]
 
-        captions = [
-        "Photo of a person img looking into the camera, wearing a black cloak and red hat. Daytime, 3 mountains in the background, a medieval castle can be seen on the far right mountain",
-        """A photo of an angry businessman img in a yellow suit, talking on the phone and looking into the camera. He is in the street of a big city: to the left behind him is a bank building with a big sign above it saying "Neon Bank".""",
-        # "A 2d cartoon-style photo of a small but very muscular dwarf img with a long red beard looking into the camera. He has a naked top and is holding a massive battleaxe in his left hand. He is in a tavern, with many tables behind him and a bar with a barman.",
-        " A photo of a man img in a space suit, his face is seen very surprised, he is in the desert near Oathis with lake, palm trees and a couple of camels behind him.",
-        # "A photo of man img with blue hair , looking at the viewer, dressed in a red clown suit and clown make-up seated on a bench with a windmill far behind him.",
-        "A photo of a middle-aged man img in a dark green sweater looking at the viewer, he is in a room with white walls, there is a portrait behind him and a books on a shelf."
-        ]
+        captions = BASIC_CAPTIONS
 
         index = []
         for id in self.ids:
@@ -398,14 +377,7 @@ class OutTrainValDataset(BaseDataset):
             'nm0005452'
         ]
 
-        captions = [
-        "Photo of a person img looking into the camera, wearing a black cloak and red hat. Daytime, 3 mountains in the background, a medieval castle can be seen on the far right mountain",
-        """A photo of an angry businessman img in a yellow suit, talking on the phone and looking into the camera. He is in the street of a big city: to the left behind him is a bank building with a big sign above it saying "Neon Bank".""",
-        # "A 2d cartoon-style photo of a small but very muscular dwarf img with a long red beard looking into the camera. He has a naked top and is holding a massive battleaxe in his left hand. He is in a tavern, with many tables behind him and a bar with a barman.",
-        " A photo of a man img in a space suit, his face is seen very surprised, he is in the desert near Oathis with lake, palm trees and a couple of camels behind him.",
-        # "A photo of man img with blue hair , looking at the viewer, dressed in a red clown suit and clown make-up seated on a bench with a windmill far behind him.",
-        "A photo of a middle-aged man img in a dark green sweater looking at the viewer, he is in a room with white walls, there is a portrait behind him and a books on a shelf."
-        ]
+        captions = BASIC_CAPTIONS
 
         index = []
         for id in self.ids:

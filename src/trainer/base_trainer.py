@@ -18,6 +18,7 @@ from diffusers.utils import (
 from src.model.photomaker.our_pipeline import OurPhotoMakerStableDiffusionXLPipeline
 from src.model.photomaker.pipeline_orig import PhotoMakerStableDiffusionXLPipeline
 from src.model.ipmakerbg.pipeline_orig import IPMakerBGStableDiffusionXLPipeline
+from src.model.ip_lora.pipeline_orig import IPMakerLoraStableDiffusionXLPipeline
 from diffusers import EulerDiscreteScheduler
 from src.logger.utils import BaseTimer
 from itertools import chain
@@ -236,7 +237,7 @@ class BaseTrainer:
 
         if epoch == 1 and self.accelerator.is_main_process:
             for part, dataloader in self.evaluation_dataloaders.items():
-                if isinstance(self.pipe, PhotoMakerStableDiffusionXLPipeline) or isinstance(self.pipe, IPMakerBGStableDiffusionXLPipeline):
+                if isinstance(self.pipe, PhotoMakerStableDiffusionXLPipeline) or isinstance(self.pipe, IPMakerBGStableDiffusionXLPipeline) or isinstance(self.pipe, IPMakerLoraStableDiffusionXLPipeline):
                     self.pipe.unfuse_lora()
                     self.pipe.delete_adapters("photomaker")
                 val_logs = self._evaluation_epoch(epoch - 1, part, dataloader)
@@ -333,7 +334,7 @@ class BaseTrainer:
         # Run val/test
         if self.accelerator.is_main_process:
             for part, dataloader in self.evaluation_dataloaders.items():
-                if isinstance(self.pipe, PhotoMakerStableDiffusionXLPipeline) or isinstance(self.pipe, IPMakerBGStableDiffusionXLPipeline):
+                if isinstance(self.pipe, PhotoMakerStableDiffusionXLPipeline) or isinstance(self.pipe, IPMakerBGStableDiffusionXLPipeline) or isinstance(self.pipe, IPMakerLoraStableDiffusionXLPipeline):
                     self.pipe.unfuse_lora()
                     self.pipe.delete_adapters("photomaker")
                 val_logs = self._evaluation_epoch(epoch, part, dataloader)

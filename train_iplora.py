@@ -15,7 +15,7 @@ import os
 import subprocess
 import datetime
 import torch.distributed
-from src.model.ip_adapter.pipeline_orig import IPMakerStableDiffusionXLPipeline
+from src.model.ip_lora.pipeline_orig import IPMakerLoraStableDiffusionXLPipeline
 
 
 def get_nvidia_smi_output():
@@ -26,7 +26,7 @@ def get_nvidia_smi_output():
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
-@hydra.main(version_base=None, config_path="src/configs", config_name="train_ipmaker")
+@hydra.main(version_base=None, config_path="src/configs", config_name="train_iplora")
 def main(config):
     """
     Main script for training. Instantiates the model, optimizer, scheduler,
@@ -36,7 +36,7 @@ def main(config):
     Args:
         config (DictConfig): hydra experiment config.
     """
-    # torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=3600))
+    torch.distributed.init_process_group(backend="nccl", timeout=datetime.timedelta(seconds=3600))
     set_random_seed(config.trainer.seed)
     print(os.getpid())
 
@@ -72,12 +72,16 @@ def main(config):
             )
 
     # build optimizer, learning rate scheduler
-    adapter_params = filter(lambda p: p.requires_grad, model.adapter_modules.parameters())
+    # print([name for name, p in model.adapter_modules.named_parameters()])
+    lora_params = filter(lambda p: p.requires_grad, model.lora_modules.parameters())
+    adapter_params = [p for name, p in model.adapter_modules.named_parameters() if p.requires_grad and 'lora' in name]
+    # adapter_params = filter(lambda p: p.requires_grad, model.adapter_modules.parameters())
     visual_projection_params = filter(lambda p: p.requires_grad, model.id_encoder.visual_projection.parameters())
     visual_projection_2_params = filter(lambda p: p.requires_grad, model.id_encoder.visual_projection_2.parameters())
     id_embeds_layer_norm_params = filter(lambda p: p.requires_grad, model.id_encoder.layer_norm.parameters())
 
     trainable_params = [
+        {'params': lora_params, 'lr': config.lr_for_lora, 'name': 'lora_params'},
         {'params': adapter_params, 'lr': config.lr_for_adapter_modules, 'name': 'adapter_modules_params'},
         {'params': visual_projection_params, 'lr': config.lr_for_vis_proj, 'name': 'vis_proj_params'},
         {'params': visual_projection_2_params, 'lr': config.lr_for_vis_proj_2, 'name': 'vis_proj_2_params'},
@@ -122,7 +126,7 @@ def main(config):
     pipe = None
     if accelerator.is_main_process:
         print(config.model.pretrained_model_name_or_path)
-        pipe = IPMakerStableDiffusionXLPipeline.from_pretrained(
+        pipe = IPMakerLoraStableDiffusionXLPipeline.from_pretrained(
                 config.model.pretrained_model_name_or_path, #'SG161222/RealVisXL_V3.0',  
                 torch_dtype=torch.float16, 
                 use_safetensors=True, 

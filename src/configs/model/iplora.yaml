@@ -1,0 +1,4 @@
+_target_: src.model.IPMakerLora
+pretrained_model_name_or_path: 'hotshotco/SDXL-512'
+rank: 64
+weight_dtype: fp16

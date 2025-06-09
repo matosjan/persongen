@@ -1,5 +1,5 @@
 defaults:
-  - model: photomaker
+  - model: ipmakerbg
   - metrics: example
   - datasets: id_dataset # we do not want to run inference on training data
   - dataloader: example

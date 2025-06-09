@@ -1,0 +1,63 @@
+defaults:
+  - model: iplora
+  - writer: wandb
+  - metrics: example
+  - datasets: id_dataset
+  - dataloader: example
+  - transforms: example_only_instance
+  - ddp: accelerate
+  - _self_
+
+optimizer:
+  _convert_: partial
+  _target_: torch.optim.Adam
+  # weight_decay: 1e-2
+
+lr_for_adapter_modules: 1e-5
+lr_for_lora: 1e-5
+lr_for_vis_proj: 1e-5
+lr_for_vis_proj_2: 1e-5
+lr_for_id_layer_norm: 1e-4
+
+lr_warmup_steps: 1000
+
+# lr_scheduler:
+#   _target_: torch.optim.lr_scheduler.ConstantLR # не сохраняю state_dict
+#   factor: 1
+
+# for warmup
+lr_scheduler:
+  _target_: torch.optim.lr_scheduler.LambdaLR # не сохраняю state_dict
+
+loss_function:
+  _target_: src.loss.DiffusionLoss
+
+hyperparams:
+  masked_loss_p: 0.5
+  do_cfg_p: 0.1
+
+trainer:
+  log_step: 50
+  n_epochs: 10000
+  epoch_len: 1000
+  # device_tensors: ["pixel_values"] # which tensors should be on device (ex. GPU)
+  resume_from: null # null or path to the checkpoint dir with *.pth and config.yaml
+  from_pretrained: null
+  device: auto # device name or "auto"
+  override: True # if True, will override the previous run with the same name
+  monitor: "max val_id_sim" #"max test_MulticlassAccuracy" # "off" or "max/min metric_name", i.e. our goal is to maximize/minimize metric
+  save_period: 2 # checkpoint each save_period epochs in addition to the best epoch
+  early_stop: ${trainer.n_epochs} # epochs for early stopping
+  save_dir: "saved"
+  seed: 0
+
+validation_args:
+  negative_prompt: "nsfw, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
+  num_images_per_prompt: 5
+  num_inference_steps: 50
+  start_merge_step: 10
+  guidance_scale: 5
+  height: 512
+  width: 512
+
+
