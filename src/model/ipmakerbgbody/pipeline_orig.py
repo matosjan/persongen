@@ -66,8 +66,7 @@ PipelineImageInput = Union[
 
 from src.model.ipmakerbg.orig_id_encoder import OrigPhotoMakerIDEncoder
 from ip_adapter.attention_processor import AttnProcessor2_0 as AttnProcessor
-from src.model.attn_procs.attn_processor import myIPAttnProcessor2_0 as IPAttnProcessor
-# from src.model.attn_procs.attn_processor import myIPAttnProcessorSequential2_0 as IPAttnProcessor 
+from src.model.attn_procs.attn_processor import myIPAttnProcessorTwoConds2_0 as IPAttnProcessor
 
 
 # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.rescale_noise_cfg
@@ -145,7 +144,7 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
     
 
-class IPMakerBGStableDiffusionXLPipeline(StableDiffusionXLPipeline):
+class IPMakerBGBodyStableDiffusionXLPipeline(StableDiffusionXLPipeline):
     @validate_hf_hub_args
     @torch.inference_mode
     def load_photomaker_adapter(
@@ -210,7 +209,7 @@ class IPMakerBGStableDiffusionXLPipeline(StableDiffusionXLPipeline):
         self.load_lora_weights(state_dict["lora_weights"], adapter_name="photomaker")
         # for name, p in self.unet.named_parameters():
         #     if 'lora' in name:
-        #         print(name, torch.sum(p))
+                # print(name, torch.sum(p))
         new_lora_weights_sum = torch.sum(torch.stack([torch.sum(p) for p in self.unet.parameters()]))
 
         # assert orig_lora_weights_sum != new_lora_weights_sum, 'Weights of unet did not change (pipe)'
@@ -666,11 +665,13 @@ class IPMakerBGStableDiffusionXLPipeline(StableDiffusionXLPipeline):
         )
         
         prompt_bg = ''
+        prompt_body = ''
         prompt_splited = prompt.split('\n\n')
-        if len(prompt_splited) == 2:
+        if len(prompt_splited) == 3:
             prompt = prompt_splited[0]
             prompt_bg = prompt_splited[1]
-        
+            prompt_body = prompt_splited[2]
+
         num_id_images = len(input_id_images)
         (
             prompt_embeds, 
@@ -744,6 +745,27 @@ class IPMakerBGStableDiffusionXLPipeline(StableDiffusionXLPipeline):
             clip_skip=self.clip_skip,
         )
 
+        (
+            prompt_body_embeds,
+            uncond_prompt_body_embeds,
+            pooled_prompt_body_embeds, # TODO: replace the pooled_prompt_embeds with text only prompt
+            uncond_pooled_prompt_body_embeds,
+        ) = self.encode_prompt(
+            prompt=prompt_body,
+            prompt_2=prompt_2,
+            device=device,
+            num_images_per_prompt=num_images_per_prompt,
+            do_classifier_free_guidance=self.do_classifier_free_guidance,
+            negative_prompt=None,
+            negative_prompt_2=None,
+            prompt_embeds=None,
+            negative_prompt_embeds=None,
+            pooled_prompt_embeds=None,
+            negative_pooled_prompt_embeds=None,
+            lora_scale=lora_scale,
+            clip_skip=self.clip_skip,
+        )
+
         # 5. Prepare timesteps
         timesteps, num_inference_steps = retrieve_timesteps(
             self.scheduler, num_inference_steps, device, timesteps, sigmas
@@ -763,10 +785,10 @@ class IPMakerBGStableDiffusionXLPipeline(StableDiffusionXLPipeline):
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
         prompt_embeds = prompt_embeds.view(bs_embed * num_images_per_prompt, seq_len, -1)
         
-        prompt_embeds_text_only = torch.cat([prompt_embeds_text_only, prompt_bg_embeds], dim=1)        
-        prompt_embeds = torch.cat([prompt_embeds, prompt_bg_embeds], dim=1)
+        prompt_embeds_text_only = torch.cat([prompt_embeds_text_only, prompt_bg_embeds, prompt_body_embeds], dim=1)        
+        prompt_embeds = torch.cat([prompt_embeds, prompt_bg_embeds, prompt_body_embeds], dim=1)
         
-        negative_prompt_embeds = torch.cat([negative_prompt_embeds, uncond_prompt_bg_embeds], dim=1)
+        negative_prompt_embeds = torch.cat([negative_prompt_embeds, uncond_prompt_bg_embeds, uncond_prompt_body_embeds], dim=1)
         # ***********************************
         
         # 8. Prepare latent variables

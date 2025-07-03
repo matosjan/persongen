@@ -1,7 +1,7 @@
 compute_environment: LOCAL_MACHINE
 distributed_type: MULTI_GPU
 # mixed_precision: 
-# main_process_port: 29504
+main_process_port: 29504
 use_cpu: false
 num_processes: 2
 num_machines: 1

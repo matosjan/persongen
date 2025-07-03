@@ -39,7 +39,7 @@ import itertools
 from peft.utils import get_peft_model_state_dict
 from peft import LoraConfig, set_peft_model_state_dict
 from transformers import CLIPImageProcessor
-from src.model.ipmakerbg.orig_id_encoder import OrigPhotoMakerIDEncoder
+from src.model.ipmakerbgbody.orig_id_encoder import OrigPhotoMakerIDEncoder
 
 from diffusers.utils import (
     convert_state_dict_to_diffusers,
@@ -47,8 +47,8 @@ from diffusers.utils import (
 )
 
 from ip_adapter.attention_processor import AttnProcessor2_0 as AttnProcessor
-from src.model.attn_procs.attn_processor import myIPAttnProcessor2_0 as IPAttnProcessor 
-# from src.model.attn_procs.attn_processor import myIPAttnProcessorSequential2_0 as IPAttnProcessor 
+from src.model.attn_procs.attn_processor import myIPAttnProcessorTwoConds2_0 as IPAttnProcessor 
+
 
 def import_model_class_from_model_name_or_path(
     pretrained_model_name_or_path: str, revision: str, subfolder: str = "text_encoder"
@@ -69,7 +69,7 @@ def import_model_class_from_model_name_or_path(
     else:
         raise ValueError(f"{model_class} is not supported.")
 
-class IPMakerBG(nn.Module):
+class IPMakerBGBody(nn.Module):
     def __init__(self, pretrained_model_name_or_path, rank, weight_dtype, device='cuda', trigger_word='img'):
         super().__init__()
         self.pretrained_model_name_or_path = pretrained_model_name_or_path
@@ -188,9 +188,10 @@ class IPMakerBG(nn.Module):
             else:
                 layer_name = name.split(".processor")[0]
                 weights = {
-                    "to_k_ip.weight": unet_sd[layer_name + ".to_k.base_layer.weight"],
-                    "to_v_ip.weight": unet_sd[layer_name + ".to_v.base_layer.weight"],
-                    # "to_q_ip.weight": unet_sd[layer_name + ".to_q.base_layer.weight"],
+                    "to_k_ip_bg.weight": unet_sd[layer_name + ".to_k.base_layer.weight"],
+                    "to_v_ip_bg.weight": unet_sd[layer_name + ".to_v.base_layer.weight"],
+                    "to_k_ip_body.weight": unet_sd[layer_name + ".to_k.base_layer.weight"],
+                    "to_v_ip_body.weight": unet_sd[layer_name + ".to_v.base_layer.weight"],
                 }
                 attn_procs[name] = IPAttnProcessor(hidden_size=hidden_size, cross_attention_dim=cross_attention_dim, num_tokens=self.num_text_tokens)
                 attn_procs[name].load_state_dict(weights)
@@ -289,14 +290,15 @@ class IPMakerBG(nn.Module):
         # attn mask
         # attn_mask = torch.ones((bsz, self.num_text_tokens + max_ref_len), dtype=torch.bool, device=self.device) 
         attn_mask = None
-        prompt_embeds_list, pooled_prompt_embeds_list, prompt_bg_embeds_list = [], [], []
+        prompt_embeds_list, pooled_prompt_embeds_list, prompt_bg_embeds_list, prompt_body_embeds_list = [], [], [], []
         for i, (prompt, refs) in enumerate(zip(caption, ref_images)):
             prompt_bg = ''
+            prompt_body = ''
             prompt_splited = prompt.split('\n\n')
-            if len(prompt_splited) == 2:
+            if len(prompt_splited) == 3:
                 prompt = prompt_splited[0]
                 prompt_bg = prompt_splited[1]
-            prompt = prompt.split('.')[0]
+                prompt_body = prompt_splited[2]
                 
             prompt_embeds, pooled_prompt_embeds, class_tokens_mask = self.encode_prompt_with_trigger_word(
                 prompt=prompt,
@@ -306,13 +308,19 @@ class IPMakerBG(nn.Module):
             
             if do_cfg is True:
                 prompt_bg = ''
+                prompt_body = ''
             
             prompt_bg_embeds, _ = self.encode_prompt(
                 prompt=prompt_bg,
             )
+            prompt_body_embeds, _ = self.encode_prompt(
+                prompt=prompt_body,
+            )
+
             
             pooled_prompt_embeds_list.append(pooled_prompt_embeds)
             prompt_bg_embeds_list.append(prompt_bg_embeds)
+            prompt_body_embeds_list.append(prompt_body_embeds)
             
             #*********************************************************
             if do_cfg is False:
@@ -327,6 +335,7 @@ class IPMakerBG(nn.Module):
         prompt_embeds = torch.concat(prompt_embeds_list, dim=0)
         pooled_prompt_embeds = torch.concat(pooled_prompt_embeds_list, dim=0)
         prompt_bg_embeds = torch.concat(prompt_bg_embeds_list, dim=0)
+        prompt_body_embeds = torch.concat(prompt_body_embeds_list, dim=0)
         
         if do_cfg is True:
             dummy = sum(p.sum() for p in self.id_encoder.parameters()) * 0
@@ -339,7 +348,7 @@ class IPMakerBG(nn.Module):
         add_text_embeds = add_text_embeds.to(self.device, dtype=self.unet.dtype)
         added_cond_kwargs = {"text_embeds": add_text_embeds, "time_ids": add_time_ids}
         
-        encoder_hidden_states = torch.cat([prompt_embeds, prompt_bg_embeds], dim=1)
+        encoder_hidden_states = torch.cat([prompt_embeds, prompt_bg_embeds, prompt_body_embeds], dim=1)
         model_pred = self.unet(
             noisy_model_input,
             timesteps,

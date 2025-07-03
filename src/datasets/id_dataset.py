@@ -13,8 +13,8 @@ from src.id_utils.aligner import Aligner
 from tqdm import tqdm
 Image.MAX_IMAGE_PIXELS = 933120000
 
-DATA_PREFIX = "/home/jovyan/shares/SR006.nfs2/free001style/final"
-OOD_DATA_PREFIX = "/home/jovyan/shares/SR006.nfs2/matos/persongen_main_version/data/additional_val"
+DATA_PREFIX = "/home/jovyan/home/jovyan/shares/SR006.nfs2/bobkov/full_dataset"
+OOD_DATA_PREFIX = "/home/jovyan/home/jovyan/shares/SR006.nfs2/matos/persongen/data/additional_val"
 
 BASIC_CAPTIONS = [
         "Photo of a person img looking into the camera, wearing a black cloak and red hat. Daytime, 3 mountains in the background, a medieval castle can be seen on the far right mountain",
@@ -32,6 +32,15 @@ SPLITTED_CAPTIONS = [
         " A photo of a man img in a space suit, his face is seen very surprised.\n\nHe is in the desert near Oathis with lake, palm trees and a couple of camels behind him.",
         # "A photo of man img with blue hair , looking at the viewer, dressed in a red clown suit and clown make-up seated on a bench with a windmill far behind him.",
         "A photo of a middle-aged man img in a dark green sweater looking at the viewer.\n\nHe is in a room with white walls, there is a portrait behind him and a books on a shelf."
+        ]
+
+SPLITTED_BODY_CAPTIONS = [
+        "Photo of a person img looking into the camera.\n\nDaytime, 3 mountains in the background, a medieval castle can be seen on the far right mountain.\n\nThe person is wearing a black cloak and red hat.",
+        """A photo of an angry businessman img looking into the camera.\n\nHe is in the street of a big city: to the left behind him is a bank building with a big sign above it saying "Neon Bank".\n\nHe is in a yellow suit, talking on the phone""",
+        # "A 2d cartoon-style photo of a small but very muscular dwarf img with a long red beard looking into the camera. He has a naked top and is holding a massive battleaxe in his left hand. He is in a tavern, with many tables behind him and a bar with a barman.",
+        " A photo of a man img, his face is seen very surprised.\n\nHe is in the desert near Oathis with lake, palm trees and a couple of camels behind him.\n\nThe man is in a space suit",
+        # "A photo of man img with blue hair , looking at the viewer, dressed in a red clown suit and clown make-up seated on a bench with a windmill far behind him.",
+        "A photo of a middle-aged man img looking at the viewer.\n\nHe is in a room with white walls, there is a portrait behind him and a books on a shelf.\n\nThe man is in a dark green sweater"
         ]
 
 def get_crop_values(img_data, target_res=512):
@@ -178,7 +187,7 @@ class IDValDataset(BaseDataset):
             "nm0001841" : ["2", "27"]
         }
 
-        captions = BASIC_CAPTIONS
+        captions = SPLITTED_CAPTIONS
 
         index = []
         for id, id_data in ids_json.items():
@@ -242,7 +251,7 @@ class OODValDataset(BaseDataset):
             'vetrov'
         ]
 
-        captions = BASIC_CAPTIONS
+        captions = SPLITTED_CAPTIONS
 
         index = []
         for id in self.ids:
@@ -309,7 +318,7 @@ class InTrainValDataset(BaseDataset):
             'nm0005151'
         ]
 
-        captions = BASIC_CAPTIONS
+        captions = SPLITTED_CAPTIONS
 
         index = []
         for id in self.ids:
@@ -377,7 +386,7 @@ class OutTrainValDataset(BaseDataset):
             'nm0005452'
         ]
 
-        captions = BASIC_CAPTIONS
+        captions = SPLITTED_CAPTIONS
 
         index = []
         for id in self.ids:
