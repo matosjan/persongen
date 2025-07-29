@@ -2,7 +2,6 @@
 
 This repository contains the code for my Bachelor's thesis at the Faculty of Computer Science, HSE University (2025). The project investigates and implements modern methods for personalized face generation using state-of-the-art generative models.
 
----
 
 ## Overview
 
@@ -10,7 +9,6 @@ This project explores the problem of generating photorealistic, identity-preserv
 
 In this work, we investigate whether explicitly separating input information into semantically independent components can improve both identity preservation and text-image alignment.&#x20;
 
----
 
 ## Conducted Work
 
@@ -21,7 +19,6 @@ In this work, we investigate whether explicitly separating input information int
 - Proposed and implemented a custom method built around the hypothesis, based on [IP-Adapter](https://arxiv.org/abs/2308.06721) and PhotoMaker
 - Designed experiments aimed at testing the hypothesis by comparing different methods using CLIP-T, Face-Sim metrics, and qualitative assessments
 
----
 
 ## Results
 
@@ -29,7 +26,6 @@ As a result of the conducted experiments, we found that the proposed hypothesis 
 
 Our custom method, inspired by the architectural ideas of PhotoMaker and IP-Adapter and explicitly implementing the proposed hypothesis, demonstrated consistent advantages over baseline methods in terms of identity fidelity and responsiveness to prompt control.
 
----
 
 ## Full Report
 
